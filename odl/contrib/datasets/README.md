@@ -22,6 +22,8 @@ Reference datasets with accompanying ODL geometries etc.
     * `walnut_data`
     * `lotus_root_data`
 
+  * `mayo`
+
     CT data as provided by Mayo Clinic. The data is from a human and of high resolution (512x512). To access the data, see [the webpage](https://ctcicblog.mayo.edu/hubcap/patient-ct-projection-data-library/). Note that downloading this dataset requires installing the NBIA Data Retriever.
     * `load_projections`
     * `load_reconstruction`
