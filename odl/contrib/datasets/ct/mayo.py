@@ -120,20 +120,25 @@ def load_projections(dir, indices=None, use_ffs=True):
     # Reverse angular axis and set origin at 6 o'clock
     angles = -np.unwrap(angles) - np.pi
 
+    # Select geometry parameters
+    src_radius = datasets[0].DetectorFocalCenterRadialDistance
+    det_radius = (datasets[0].ConstantRadialDistance -
+                  datasets[0].DetectorFocalCenterRadialDistance)
+    det_curvature_radius = src_radius + det_radius
+
     # Set minimum and maximum corners
     det_shape = np.array([datasets[0].NumberofDetectorColumns,
                           datasets[0].NumberofDetectorRows])
-    det_pixel_size = np.array([datasets[0].DetectorElementTransverseSpacing,
+
+    # Set pixel size
+    # TransverseSpacing is specified as arc length; convert this to angle.
+    det_pixel_size = np.array([datasets[0].DetectorElementTransverseSpacing /
+                                 det_curvature_radius,
                                datasets[0].DetectorElementAxialSpacing])
 
     # Correct from center of pixel to corner of pixel
     det_minp = -(np.array(datasets[0].DetectorCentralElement) - 0.5) * det_pixel_size
     det_maxp = det_minp + det_shape * det_pixel_size
-
-    # Select geometry parameters
-    src_radius = datasets[0].DetectorFocalCenterRadialDistance
-    det_radius = (datasets[0].ConstantRadialDistance -
-                  datasets[0].DetectorFocalCenterRadialDistance)
 
     # For unknown reasons, mayo does not include the tag
     # "TableFeedPerRotation", which is what we want.
@@ -177,6 +182,8 @@ def load_projections(dir, indices=None, use_ffs=True):
                                          detector_partition,
                                          src_radius=src_radius,
                                          det_radius=det_radius,
+                                         det_curvature_radius=
+                                             (det_curvature_radius, None),
                                          pitch=pitch,
                                          offset_along_axis=offset_along_axis,
                                          src_shift_func=src_shift_func)
