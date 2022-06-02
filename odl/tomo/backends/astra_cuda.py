@@ -243,7 +243,7 @@ class AstraCudaImpl:
                     out[:] = np.swapaxes(self.proj_array, 0, 1).reshape(
                         self.proj_space.shape)
                 else:
-                    out[:] = np.rollaxis(self.out_array, 0, 3).reshape(
+                    out[:] = np.rollaxis(self.proj_array, 0, 3).reshape(
                         self.proj_space.shape)
 
             # Fix scaling to weight by pixel size
