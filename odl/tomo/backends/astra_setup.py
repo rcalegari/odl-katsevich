@@ -660,6 +660,8 @@ def astra_data(astra_geom, datatype, data=None, ndim=2, allow_copy=AVOID_UNNECES
     if data is not None:
         if isinstance(data, (DiscretizedSpaceElement, np.ndarray)):
             ndim = data.ndim
+        elif isinstance(data, astra.data3d.GPULink):
+            ndim = 3  # force it for GPULink
         else:
             raise TypeError('`data` {!r} is neither DiscretizedSpaceElement '
                             'instance nor a `numpy.ndarray`'.format(data))
@@ -691,6 +693,9 @@ def astra_data(astra_geom, datatype, data=None, ndim=2, allow_copy=AVOID_UNNECES
             return link(astra_dtype_str, astra_geom, data_array)
         else:
             if isinstance(data, np.ndarray):
+                return link(astra_dtype_str, astra_geom, data)
+            # add handling GPUlink
+            elif isinstance(data, astra.data3d.GPULink):
                 return link(astra_dtype_str, astra_geom, data)
             elif data.tensor.impl == 'numpy':
                 return link(astra_dtype_str, astra_geom, data.asarray())

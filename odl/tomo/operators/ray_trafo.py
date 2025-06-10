@@ -378,7 +378,41 @@ class RayTransform(Operator):
                 range=self.domain, linear=True, **kwargs
             )
 
-        return self._adjoint
+        return self._adjoint      
+    @property
+    def adjoint_kats(self):
+        """Katsevich voxel-wise backprojection.
+        
+        Returns
+        -------
+        adjoint_kats : `KatsevichBackProjection`
+        """
+        if not hasattr(self, '_adjoint_kats') or self._adjoint_kats is None:
+            # bring `self` into scope to prevent shadowing in inline class
+            ray_trafo = self
+            class KatsevichBackProjection(Operator):
+                """Katsevich backprojection operator."""
+                def __init__(self):
+                    super().__init__(domain=ray_trafo.range,
+                                    range=ray_trafo.domain, linear=True)                
+                    self.grid = ray_trafo.domain.grid 
+                    self.mesh = self.grid.meshgrid 
+                def _call(self, x, out=None, **kwargs):
+                    # x is the filtered data
+                    return ray_trafo.get_impl(
+                        ray_trafo.use_cache
+                    ).call_backward_kats(x, out, **kwargs)
+
+                @property
+                def geometry(self):
+                    return ray_trafo.geometry
+                @property
+                def adjoint(self):
+                    return ray_trafo
+    
+            self._adjoint_kats = KatsevichBackProjection()
+        
+        return self._adjoint_kats
 
 
 if __name__ == '__main__':
