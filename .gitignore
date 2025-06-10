@@ -101,3 +101,10 @@ target/
 *.pyproj.user
 *.pyperf
 *.psess
+examples/kats/
+examples/tomo/curved_det.py
+examples/tomo/td_window/
+odl/tomo/analytic/Parker weighting.png
+odl/tomo/analytic/Tam-Danielson window.png
+odl/tomo/analytic/fbp_filter.png
+odl/tomo/analytic/filtered_back_projection_old.py
