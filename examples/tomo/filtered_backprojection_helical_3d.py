@@ -11,6 +11,7 @@ Tam-Danielson window.
 
 import numpy as np
 import odl
+import os
 
 
 # --- Set up geometry of the problem --- #
@@ -36,6 +37,9 @@ ray_trafo = odl.tomo.RayTransform(space, geometry)
 # Unwindowed fbp
 # We select a Hamming filter, and only use the lowest 80% of frequencies to
 # avoid high frequency noise.
+
+filter_fbp = odl.tomo.fbp_filter_op(ray_trafo, filter_type='Hamming', frequency_scaling=0.8)
+
 fbp = odl.tomo.fbp_op(ray_trafo, filter_type='Hamming', frequency_scaling=0.8)
 
 # Create Tam-Danielson window to improve result
@@ -54,13 +58,16 @@ proj_data = ray_trafo(phantom)
 # Calculate FBP reconstructions, once without window, once with window
 fbp_reconstruction = fbp(proj_data)
 w_fbp_reconstruction = windowed_fbp(proj_data)
+filtered_data = filter_fbp(proj_data)
 
-# Show a slice of phantom, projections, and reconstruction
-phantom.show(title='Phantom',
-             coords=[0, None, None], clim=[-0.1, 1.1])
-proj_data.show(title='Simulated Data (Sinogram)')
-fbp_reconstruction.show(title='Filtered Back-projection',
-                        coords=[0, None, None], clim=[-0.1, 1.1])
-w_fbp_reconstruction.show(title='Windowed Filtered back-projection',
-                          coords=[0, None, None], clim=[-0.1, 1.1],
-                          force_show=True)
+# save images
+# get path where this file is located
+path = os.path.dirname(os.path.abspath(__file__))
+
+phantom.show(saveto = path + '/pictures/phantom.png')
+proj_data.show(saveto = path + '/pictures/flat_sinogram.png')
+fbp_reconstruction.show(saveto = path + '/pictures/flat_fbp_reconstruction.png')
+w_fbp_reconstruction.show(saveto = path + '/pictures/flat_w_fbp_reconstruction.png')
+(phantom - fbp_reconstruction).show(saveto = path + '/pictures/flat_fbp_error.png')
+(phantom - w_fbp_reconstruction).show(saveto = path + '/pictures/flat_w_fbp_error.png')
+ray_trafo.range.element(filtered_data).show(saveto = path + '/pictures/filtered_data.png')

@@ -533,6 +533,219 @@ class AstraCudaImpl:
         
 
 
+    @_add_default_complex_impl
+    def call_backward_kats(self, x, out=None, **kwargs):
+        return self._call_backward_kats_real(x, out, **kwargs)
+    
+    def _call_backward_kats_real(self, x, out=None, **kwargs):
+        """
+        Run a Katsevich ASTRA backprojection with voxel-wise scaling.
+        This assumes that the input data is already filtered.
+        x is the (filtered) projection data, out is the output volume.
+        """
+        import cupy as cp
+        from tqdm import tqdm
+
+        with self._mutex:
+            assert x in self.proj_space.real_space
+            
+            if out is not None:
+                assert out in self.vol_space
+            else:
+                out = self.vol_space.element()
+            
+            out[:] = 0.0
+
+            mesh = self.vol_space.grid.meshgrid 
+            # X mesh
+            X = np.broadcast_arrays(*mesh) 
+            X = np.stack(X, axis=-1)
+
+            '''convert data from ODL format to NumPy array
+               and reshape it to match the geometry
+            '''
+            reshaped_proj_data = x.asarray().reshape((-1,) +
+                                                    self.geometry.det_partition.shape)
+
+            # reordering needed for ASTRA
+            # taken out of loop
+            if self.geometry.det_curvature_radius is None:
+
+                reshaped_proj_data = np.asarray(np.swapaxes(reshaped_proj_data, 0, 1), dtype=np.float32, order='C')  
+                # (N_w, N_s, N_u) for flat
+            else:
+                reshaped_proj_data = np.asarray(np.rollaxis(reshaped_proj_data, 2, 0), dtype=np.float32, order='C')  
+                # (N_u, N_s, N_w) for curved
+            
+            '''reshaped_proj_data OKAY'''
+
+            # = proj_geom
+            full_proj_geoms = astra_projection_geometry(self.geometry)
+            # = vol_geom
+            vol_geom = astra_volume_geometry(self.vol_space)
+
+            '''vol_geom same OKAY'''
+            
+            # Make CuPy arrays
+            reshaped_proj_data_cp = cp.array(reshaped_proj_data, dtype = cp.float32, blocking =  True)
+            rec_volume_cp = cp.zeros(astra.geom_size(vol_geom), dtype = cp.float32)
+            bp_astra_cp = cp.zeros(astra.geom_size(vol_geom), dtype = cp.float32)
+            z_dim, y_dim, x_dim = bp_astra_cp.shape
+            bp_astra_link = astra.data3d.GPULink(bp_astra_cp.data.ptr, x_dim, y_dim, z_dim, bp_astra_cp.strides[-2])
+            # bp_astra_id = astra.data3d.link('-vol', vol_geom, bp_astra_link)
+            # new vol_id!!
+            bp_astra_id = astra_data(vol_geom, datatype='volume', data=bp_astra_link, ndim=3)
+
+            # CUDA kernel grid:
+            blocksize_z: int = min(bp_astra_cp.shape[2], 64)
+            blocksize_y: int = min(bp_astra_cp.shape[1], 4)
+            blocksize_x: int = min(bp_astra_cp.shape[0], 2)
+
+            num_blocks = lambda n_elems, blocksize : (n_elems + blocksize - 1) // blocksize
+
+            numBlocks_x: int = min( num_blocks(bp_astra_cp.shape[0], blocksize_x), 2**31 - 1 )
+            numBlocks_y: int = min( num_blocks(bp_astra_cp.shape[1], blocksize_y), 2**31 - 1 )
+            numBlocks_z: int = min( num_blocks(bp_astra_cp.shape[2], blocksize_z), 65535 )
+
+            # Dimensions struct to be passed to the CUDA kernel:
+            dims3 = np.dtype({'names': ["rows", "columns", "slices"], 'formats': [np.uint32]*3})
+            bp_dims3 = np.asarray(bp_astra_cp.shape, dtype=np.uint32).view(dims3)
+
+            ''' 
+            The kernel applies the voxel-wise scaling to the backprojection 
+            volume. The scaling coefficient is computed according to 
+            formula (32) for v* in Noo et al (2003).
+            See also formula (31) for details about the backprojection.
+            https://www.researchgate.net/publication/8936875_Exact_helical_reconstruction_using_native_cone-beam_geometries
+            '''
+            # for now works only for axis of rotation = z axis
+            
+            scale_integrate_kernel = cp.RawKernel(r'''
+            extern "C" __global__
+            void scale_integrate_cu(float* bp_volume, float *rec_volume, float xsize, float xmin, float ysize, float ymin, float angle, float scan_radius, float scale_const, uint3 vol_dims, float ev0_x, float ev0_y, float ev0_z) {
+                
+                unsigned int gridRowInd = blockDim.x * blockIdx.x + threadIdx.x; 
+                unsigned int gridColInd = blockDim.y * blockIdx.y + threadIdx.y;
+                unsigned int gridSliInd = blockDim.z * blockIdx.z + threadIdx.z;
+                                        
+                unsigned int gridRowStride = blockDim.x * gridDim.x;
+                unsigned int gridColStride = blockDim.y * gridDim.y;
+                unsigned int gridSliStride = blockDim.z * gridDim.z;
+                
+                float ang_sin, ang_cos;
+                sincosf(angle, &ang_sin, &ang_cos);
+                float ev_x = ang_cos * ev0_x - ang_sin * ev0_y;
+                float ev_y = ang_sin * ev0_x + ang_cos * ev0_y;
+                
+                for(unsigned int j_col = gridColInd; j_col < vol_dims.y; j_col += gridColStride)
+                {
+                    for(unsigned int k_sli = gridSliInd; k_sli < vol_dims.z; k_sli += gridSliStride)
+                    {
+                        // The volume shape - x for rows, y for columns, z for slices, is shaped so that axes follow as (z, y, x)
+
+                        float X = xsize*k_sli + xmin + 0.5f*xsize;
+                        float Y = ysize*j_col + ymin + 0.5f*ysize;
+
+                        float scale_coeff = scale_const*(scan_radius + X*ev_x + Y*ev_y);
+                        for(unsigned int i_row = gridRowInd; i_row < vol_dims.x; i_row += gridRowStride)
+                        {
+                            unsigned long long tid = k_sli + j_col*vol_dims.z + i_row * vol_dims.z * vol_dims.y;
+                            rec_volume[tid] += bp_volume[tid] / scale_coeff;
+                        }
+                    }
+                }
+            }
+            ''', 'scale_integrate_cu')
+
+            angles = self.geometry.angles
+            z0 = self.geometry.src_position(angles)[0, 2]
+            z1 = self.geometry.src_position(angles)[-1, 2]
+            z_range = z1 - z0 
+            pitch = self.geometry.pitch  
+            turn_length = pitch # z displacement per full turn
+            num_turns = z_range / turn_length
+            projs_per_turn = len(angles) / num_turns
+            
+            delta_x = self.vol_space.cell_sides[0] # same as in conf
+            if self.geometry.det_curvature_radius is None:
+                pixel_size = self.geometry.det_partition.cell_sides[0]
+            else:
+                pixel_size = np.tan(self.geometry.det_partition.cell_sides[0]) * self.geometry.det_curvature_radius
+            sdd = self.geometry.src_radius + self.geometry.det_radius
+            sod = self.geometry.src_radius
+            astra_bp_scaling = (delta_x**3) / ((pixel_size / (sdd / sod))**2)
+             
+            scale_coeff = astra_bp_scaling * projs_per_turn
+            # print("ASTRA scaling: ", astra_bp_scaling)
+            # print("scale coeff: ", scale_coeff)
+
+            '''run ASTRA backprojection for each angle
+               and apply voxel-wise scaling
+            '''
+            ''' improve performance 
+                take out of the loop as much as possible 
+            '''
+            # #precompute projection geometries per angle
+            cached_proj_geoms = [dict(full_proj_geoms, Vectors = np.reshape(
+                                      full_proj_geoms['Vectors'][k], (1, -1))) 
+                                      for k in range(len(self.geometry.angles))]
+            
+            for k, s in enumerate(tqdm(self.geometry.angles, desc = 'Katsevich Backprojection')):
+                
+                proj_geom_k = cached_proj_geoms[k] # projection geometry for angle k
+                '''proj_geom_k per angle same OKAY'''
+                gk = cp.expand_dims(reshaped_proj_data_cp[:, k, :], 1) # projection data for angle k 
+                z_dim, y_dim, x_dim = gk.shape
+                # create ASTRA objects
+                sino_astra_link = astra.data3d.GPULink(gk.data.ptr, x_dim, y_dim, z_dim, gk.strides[-2])
+                sino_astra_id = astra_data(proj_geom_k, datatype='projection', data=sino_astra_link, ndim=3)
+                alg_id_k = astra_algorithm('backward', ndim = 3, 
+                                           vol_id = bp_astra_id, sino_id = sino_astra_id,
+                                           proj_id = self.proj_id, impl = 'cuda')
+                '''alg_id_k same OKAY'''
+                astra.algorithm.run(alg_id_k)
+                astra.algorithm.delete([alg_id_k])
+                astra.data3d.delete([sino_astra_id])
+
+                '''
+                PROBLEM: the values of x_min, y_min and angle were very incorrect!!
+                I was mistakenly using the starting values of the src.
+                NOW CORRECTED.
+                '''
+                
+                angle = s
+                x_min = self.vol_space.min_pt[0]
+                y_min = self.vol_space.min_pt[1]
+                delta_y = self.vol_space.cell_sides[1]
+                ev0 = cp.asarray(self.geometry.src_to_det_init).astype(cp.float32)
+                ev0_vals = tuple(ev0.tolist())
+                
+                scale_integrate_kernel(
+                    (numBlocks_x, numBlocks_y, numBlocks_z),
+                    (blocksize_x, blocksize_y, blocksize_z),
+                    (
+                        bp_astra_cp,
+                        rec_volume_cp,
+                        cp.float32(delta_x),
+                        cp.float32(x_min),
+                        cp.float32(delta_y),
+                        cp.float32(y_min),
+                        cp.float32(angle),
+                        cp.float32(self.geometry.src_radius),
+                        cp.float32(scale_coeff),
+                        bp_dims3,
+                        cp.float32(ev0_vals[0]),
+                        cp.float32(ev0_vals[1]),
+                        cp.float32(ev0_vals[2])
+                    )
+                )
+                
+            astra.data3d.delete([bp_astra_id])  
+            raw = rec_volume_cp.get()
+            rec_volume = rec_volume_cp.get().astype(np.float32, order='C')
+            assert rec_volume.shape == self.vol_space.shape, f"Shape mismatch: got {rec_volume.shape}, expected {self.vol_space.shape}"
+            return rec_volume
+        
     def __del__(self):
         """Delete ASTRA objects."""
         if self.geometry.ndim == 2:

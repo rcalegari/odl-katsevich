@@ -938,6 +938,10 @@ class ConeBeamGeometry(DivergentBeamGeometry, AxisOrientedGeometry):
         src_to_det_init = kwargs.pop('src_to_det_init', None)
         det_axes_init = kwargs.pop('det_axes_init', None)
 
+        vertical_shift = kwargs.pop('vertical_shift', None)
+        # if vertical_shift is not None:
+        self.vertical_shift = vertical_shift
+
         # Store some stuff for repr
         if src_to_det_init is not None:
             self._src_to_det_init_arg = np.asarray(src_to_det_init,
@@ -1041,6 +1045,9 @@ class ConeBeamGeometry(DivergentBeamGeometry, AxisOrientedGeometry):
                 [0.0, 0.0, 0.0], dtype=float, ndmin=2)
         else:
             self.__det_shift_func = det_shift_func
+
+        
+
 
     @classmethod
     def frommatrix(cls, apart, dpart, src_radius, det_radius, init_matrix,
@@ -1318,6 +1325,7 @@ class ConeBeamGeometry(DivergentBeamGeometry, AxisOrientedGeometry):
         """
         squeeze_out = (np.shape(angle) == ())
         angle = np.array(angle, dtype=float, copy=AVOID_UNNECESSARY_COPY, ndmin=1)
+
         rot_matrix = self.rotation_matrix(angle)
         extra_dims = angle.ndim
         det_shifts = np.array(self.det_shift_func(angle), dtype=float, ndmin=2)
@@ -1339,9 +1347,17 @@ class ConeBeamGeometry(DivergentBeamGeometry, AxisOrientedGeometry):
         # Increment along the rotation axis according to pitch and
         # offset_along_axis
         # `shift_along_axis` has shape angles.shape
-        shift_along_axis = (self.offset_along_axis
-                            + self.pitch * angle / (2 * np.pi)
-                            + det_shifts[:, 2])
+        shift_along_axis_old = (self.offset_along_axis
+                                + self.pitch * angle / (2 * np.pi)
+                                + det_shifts[:, 2])
+        # print('det shift_along_axis_old: ', type(shift_along_axis_old), np.shape(shift_along_axis_old))
+        if self.vertical_shift is not None and isinstance(angle, np.ndarray):
+            shift_along_axis = self.vertical_shift
+        else:
+            shift_along_axis = (self.offset_along_axis
+                                + self.pitch * angle / (2 * np.pi)
+                                + det_shifts[:, 2])
+        # print('det shift_along_axis: ', type(shift_along_axis), np.shape(shift_along_axis))
         # Create outer product of `shift_along_axis` and `axis`, resulting
         # in shape (a, ndim)
         pitch_component = np.multiply.outer(shift_along_axis, self.axis)
@@ -1457,11 +1473,32 @@ class ConeBeamGeometry(DivergentBeamGeometry, AxisOrientedGeometry):
         # Increment along the rotation axis according to pitch and
         # offset_along_axis
         # `shift_along_axis` has shape angles.shape
-        shift_along_axis = (self.offset_along_axis
-                            + self.pitch * angle / (2 * np.pi)
+        # print('src_shifts', src_shifts[:, 2]) # 0
+        # print('self.offset_along_axis', self.offset_along_axis) # 0
+        # print('angle ODL: ', angle[0])
+        pitch_array = self.pitch * angle / (2 * np.pi)
+        # compute new array of differences between consecutive z positions
+        # pitch_diff = pitch_array[1:] - pitch_array[:-1]
+        # pitch_array = np.linspace(-0.5 * pitch_diff[0] * angle.shape[0], 
+        #                           0.5 * pitch_diff[0] * angle.shape[0],
+        #                           angle.shape[0])
+        # print('pitch diff', pitch_diff) # constant
+        shift_along_axis_old = (self.offset_along_axis
+                            + pitch_array
                             + src_shifts[:, 2])
+        # print('src shift_along_axis_old: ', type(shift_along_axis_old), np.shape(shift_along_axis_old)) 
+        if self.vertical_shift is not None and isinstance(angle, np.ndarray):
+            # if angle is an array, vertical_shift must be an array
+            shift_along_axis = self.vertical_shift
+        else:
+            shift_along_axis = (self.offset_along_axis
+                            + pitch_array
+                            + src_shifts[:, 2])
+        # print('src shift_along_axis: ', type(shift_along_axis), np.shape(shift_along_axis))
+        # print('vertical_shift ODL', shift_along_axis[0]) 
         # Create outer product of `shift_along_axis` and `axis`, resulting
         # in shape (a, ndim)
+        # print('shift_along_axis', shift_along_axis)
         pitch_component = np.multiply.outer(shift_along_axis, self.axis)
 
         # Broadcast translation along extra dimensions
@@ -1469,6 +1506,9 @@ class ConeBeamGeometry(DivergentBeamGeometry, AxisOrientedGeometry):
         refpt = (self.translation[transl_slc]
                  + circle_component
                  + pitch_component)
+        # print('translation z component', self.translation[transl_slc]) # = 000
+        # print('circle z component', circle_component) # on x-y plane
+        # print('pitch z component', pitch_component[:, 2])
         if squeeze_out:
             refpt = refpt.squeeze()
 
@@ -1924,6 +1964,77 @@ def helical_geometry(space, src_radius, det_radius, num_turns,
 
     return ConeBeamGeometry(angle_partition, det_partition,
                             src_radius, det_radius,
+                            offset_along_axis=offset_along_axis,
+                            pitch=pitch)
+
+def helical_geometry_curved(space, src_radius, det_radius, num_turns,
+                     n_pi=1, num_angles=None, det_shape=None, curvature_radius = None):
+
+    if not curvature_radius:
+        curvature_radius = src_radius + det_radius
+
+    # Find maximum distance from rotation axis
+    corners = space.domain.corners()[:, :2]
+    rho = np.max(np.linalg.norm(corners, axis=1))
+
+    offset_along_axis = space.partition.min_pt[2]
+    pitch = space.partition.extent[2] / num_turns
+
+    # Find default values according to Nyquist criterion.
+
+    # We assume that the function is bandlimited by a wave along the x or y
+    # axis. The highest frequency we can measure is then a standing wave with
+    # period of twice the inter-node distance.
+    min_side = min(space.partition.cell_sides[:2])
+    omega = np.pi / min_side
+
+    # Compute minimum width of the detector to cover the object. The relation
+    # used here is (w/2)/(rs+rd) = rho/rs since both are equal to tan(alpha),
+    # where alpha is the half fan angle.
+    rs = float(src_radius)
+    if (rs <= rho):
+        raise ValueError('source too close to the object, resulting in '
+                         'infinite detector for full coverage')
+    rd = float(det_radius)
+    r = rs + rd
+    w = 2 * rho * (rs + rd) / rs
+
+    # Compute minimum number of pixels given the constraint on the
+    # sampling interval and the computed width
+    rb = np.hypot(r, w / 2)  # length of the boundary ray to the flat detector
+    num_px_horiz = 2 * int(np.ceil(w * omega * r / (2 * np.pi * rb))) + 1
+
+    # Compute lower and upper bound needed to fully sample the object.
+    # In particular, since in a helical geometry several turns are used,
+    # this is selected so that the field of view of two opposing projections,
+    # separated by theta = 180 deg, overlap, but as little as possible.
+    # See `tam_danielson_window` for more information.
+    h_axis = (pitch / (2 * np.pi) *
+              (1 + (-rho / src_radius) ** 2) *
+              (n_pi * np.pi / 2.0 - np.arctan(-rho / src_radius)))
+    h = 2 * h_axis * (rs + rd) / rs
+
+    # Compute number of pixels
+    min_mag = r / rs
+    dh = 0.5 * space.partition.cell_sides[2] * min_mag
+    num_px_vert = int(np.ceil(h / dh))
+
+    det_min_pt = [-w / 2, -h / 2]
+    det_max_pt = [w / 2, h / 2]
+    if det_shape is None:
+        det_shape = [num_px_horiz, num_px_vert]
+
+    max_angle = 2 * np.pi * num_turns
+
+    if num_angles is None:
+        num_angles = int(np.ceil(max_angle * omega * rho / np.pi
+                                 * r / (r + rho)))
+
+    angle_partition = uniform_partition(0, max_angle, num_angles)
+    det_partition = uniform_partition(det_min_pt, det_max_pt, det_shape)
+
+    return ConeBeamGeometry(angle_partition, det_partition,
+                            src_radius, det_radius, det_curvature_radius=curvature_radius,
                             offset_along_axis=offset_along_axis,
                             pitch=pitch)
 

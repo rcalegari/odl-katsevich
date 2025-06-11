@@ -8,6 +8,7 @@ methods.
 
 import numpy as np
 import odl
+import os
 
 
 # --- Set up geometry of the problem --- #
@@ -41,10 +42,10 @@ ray_trafo = odl.tomo.RayTransform(reco_space, geometry)
 # avoid high frequency noise.
 fbp = odl.tomo.fbp_op(ray_trafo,
                       filter_type='Shepp-Logan', frequency_scaling=0.8)
+filter = odl.tomo.fbp_filter_op(ray_trafo, filter_type='Shepp-Logan', frequency_scaling=0.8)
 
 
 # --- Show some examples --- #
-
 
 # Create a discrete Shepp-Logan phantom (modified version)
 phantom = odl.phantom.shepp_logan(reco_space, modified=True)
@@ -53,10 +54,14 @@ phantom = odl.phantom.shepp_logan(reco_space, modified=True)
 proj_data = ray_trafo(phantom)
 
 # Calculate filtered back-projection of data
-fbp_reconstruction = fbp(proj_data)
+# fbp_reconstruction = fbp(proj_data)
+filtered_data = filter(proj_data)
 
 # Shows a slice of the phantom, projections, and reconstruction
-phantom.show(title='Phantom')
-proj_data.show(title='Simulated Data (Sinogram)')
-fbp_reconstruction.show(title='Filtered Back-projection')
-(phantom - fbp_reconstruction).show(title='Error', force_show=True)
+path = os.path.dirname(os.path.abspath(__file__))
+phantom.show(saveto=path + '/pictures/phantom.png')
+proj_data.show(saveto=path + '/pictures/proj_data.png')
+filtered_data.show(saveto=path + '/pictures/filtered_data.png')
+# fbp_reconstruction.show(saveto=path + '/pictures/fbp_reconstruction.png')
+# (phantom - fbp_reconstruction).show(saveto=path + '/pictures/fbp_error.png')
+

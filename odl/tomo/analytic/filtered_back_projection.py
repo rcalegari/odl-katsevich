@@ -16,7 +16,10 @@ from odl.operator.operator import Operator
 from scipy.interpolate import interp1d
 from tqdm import tqdm
 import odl
-
+from odl.operator.operator import Operator
+from scipy.interpolate import interp1d
+from tqdm import tqdm
+import odl
 
 __all__ = ('fbp_op', 'fbp_filter_op', 'katsevich_filter_op', 'tam_danielson_window',
            'parker_weighting')
@@ -58,7 +61,7 @@ def _fbp_filter(norm_freq, filter_type, frequency_scaling):
     norm_freq : `array-like`
         Frequencies normalized to lie in the interval [0, 1].
     filter_type : {'Ram-Lak', 'Shepp-Logan', 'Cosine', 'Hamming', 'Hann',
-                   callable}
+                   'Katsevich', callable}
         The type of filter to be used.
         If a string is given, use one of the standard filters with that name.
         A callable should take an array of values in [0, 1] and return the
@@ -330,6 +333,319 @@ def parker_weighting(ray_trafo, q=0.25):
    in the Pykatsevich package. 
    https://github.com/astra-toolbox/helical-kats/tree/main
 '''
+class KatsevichFilterCurvedConstPitch(Operator):
+    def __init__(self, ray_trafo):
+        self.ray_trafo = ray_trafo
+        self.geometry = ray_trafo.geometry
+
+        # extract geometry parameters
+        self.D = self.geometry.src_radius + self.geometry.det_radius
+        self.P = self.geometry.pitch
+        self.Rs = self.geometry.src_radius
+
+        self.alpha_vals = self.geometry.det_partition.coord_vectors[0]
+        self.w_vals = self.geometry.det_partition.coord_vectors[1]
+        self.dalpha = self.alpha_vals[1] - self.alpha_vals[0]
+        self.dw = self.w_vals[1] - self.w_vals[0]
+        self.N_alpha = self.geometry.det_partition.shape[0]
+        self.N_w = self.geometry.det_partition.shape[1]
+        
+        # self.ds = self.geometry.motion_partition.cell_sides[0]
+        self.ds = self.geometry.angles[1:] - self.geometry.angles[:-1]
+        self.N_s = self.geometry.motion_partition.shape[0]
+
+        # values for rebinning
+        fov_dia = max(self.ray_trafo.domain.max_pt[2] - self.ray_trafo.domain.min_pt[2], self.ray_trafo.domain.max_pt[1] - self.ray_trafo.domain.min_pt[1])
+        fov_radius = fov_dia / 2
+        if fov_radius > self.Rs:
+            raise ValueError('Field of view radius {} is larger than source radius {}.'.format(fov_radius, self.D))
+        # alpha_m is the half fan angle
+        alpha_m = np.arcsin(fov_radius / self.Rs) # Rs > fov!!!
+        
+        # formula (48) Noo et al. 2003
+        M = int((np.pi/2 + alpha_m) * self.D * self.P / (2 * self.dw * self.Rs) * (np.cos(alpha_m) \
+                + np.sin(alpha_m)*(np.tan(alpha_m) + (alpha_m + np.pi*0.5) * np.sin(alpha_m) / (np.cos(alpha_m))**2)))
+        self.detector_rebin_rows = 2*M+1 # use 128 to compare to Pykatsevich 
+        self.psi_vals = np.linspace(-np.pi/2 - alpha_m/2, np.pi/2 + alpha_m/2, self.detector_rebin_rows) 
+        
+        # forward rebinning
+        self.fwd_rebin_w = np.zeros((self.N_alpha, self.detector_rebin_rows), dtype=np.float32)
+        eps = 1e-6
+        tan_psi = np.tan(self.psi_vals)
+        tan_psi = np.where(np.abs(tan_psi) < eps, eps * np.sign(tan_psi), tan_psi)
+        
+        # precompute rebinning rows
+        # formula (26) Noo et al. 2003
+        print("Precomputing forward rebinning rows...")
+        for i, a in enumerate(self.alpha_vals):
+            cos_a = np.cos(a)
+            sin_a = np.sin(a)
+            # constant pitch
+            self.fwd_rebin_w[i] =((self.D * self.P / (2 * np.pi * self.Rs)) * (
+                self.psi_vals * cos_a + self.psi_vals / tan_psi * sin_a)) 
+            self.fwd_rebin_w[i] = np.nan_to_num(self.fwd_rebin_w[i], nan=0.0, posinf=0.0, neginf=0.0)
+            
+        # reverse rebinning
+
+        # precompute which detector row each point on the rebinning rows belongs to - map rebinning rows to detector rows
+        # see formula (55) Noo et al. 2003
+        self.rebin_row = np.zeros((self.N_alpha, self.N_w), dtype=np.int32)
+        # self.rebin_fracs_0 = c(alpha, w, l)
+        self.rebin_fracs_0 = np.zeros_like(self.rebin_row, dtype=np.float32)
+        # self.rebin_fracs_1 = 1 - c(alpha, w, l)
+        self.rebin_fracs_1 = np.ones_like(self.rebin_row, dtype=np.float32)
+
+        for row in tqdm(range(self.N_w), desc='Precomputing rebinning rows -> detector rows'):
+
+            for col in range(self.N_alpha//2, self.N_alpha):
+                self.rebin_row[col, row] = 0
+                for rebin in range(self.detector_rebin_rows - 1):
+                    if (self.w_vals[row] >= self.fwd_rebin_w[col, rebin]) \
+                        and (self.w_vals[row] <= self.fwd_rebin_w[col, rebin+1]):
+                        self.rebin_row[col, row] = rebin
+                        break
+                self.rebin_fracs_0[col, row] = (self.w_vals[row] - self.fwd_rebin_w[col, self.rebin_row[col, row]]) \
+                    / (self.fwd_rebin_w[col, self.rebin_row[col, row] + 1] - self.fwd_rebin_w[col, self.rebin_row[col, row]])
+
+            for col in range(self.N_alpha//2):
+                self.rebin_row[col, row] = 1
+                for rebin in range(self.detector_rebin_rows - 1, 0, -1):
+                    if (self.w_vals[row] >= self.fwd_rebin_w[col, rebin - 1]) \
+                        and (self.w_vals[row] <= self.fwd_rebin_w[col, rebin]):
+                            self.rebin_row[col, row] = rebin
+                            break
+                self.rebin_fracs_0[col, row] = (self.w_vals[row] - self.fwd_rebin_w[col, self.rebin_row[col, row] - 1]) \
+                    / (self.fwd_rebin_w[col, self.rebin_row[col, row]] - self.fwd_rebin_w[col, self.rebin_row[col, row] - 1])
+
+        self.rebin_fracs_1 -= self.rebin_fracs_0
+
+        # initialize as ODL operator
+        domain = self.ray_trafo.range
+        op_range = self.ray_trafo.range
+        super().__init__(domain, op_range, linear=False)
+        print("KatsevichFilterCurved initialized.")
+
+    def _call(self, g, out=None, **kwargs):
+        
+        diff = kwargs.get('diff', None)
+        g = np.asarray(g)
+        if diff == 1:
+            self._g1 = self.cf1_derivative(g)
+            print("Using cf1_derivative v1")
+        elif diff == 2:
+            self._g1 = self.cf1_derivative_v2(g)
+            print("Using cf1_derivative v2")
+        else:
+            self._g1 = self.cf1_derivative_v2(g)
+        self._g2 = self.cf2_length_weighting(self._g1)
+        self._g3 = self.cf3_forward_rebin(self._g2)
+        self._g4 = self.cf4_hilbert_transform(self._g3)
+        self._g5 = self.cf5_backward_rebin(self._g4)
+        self._g6 = self.cf6_cosine_weighting(self._g5)
+        self._gF = self.cf7_td_weighting(self._g6)
+        self._computed = True
+        result = self.ray_trafo.range.element(self._gF)
+
+        if out is not None:
+            out[:] = result
+            return out
+        return result
+
+    
+    @property
+    def g1(self):
+        if not self._computed:
+            raise RuntimeError("Run kats(g) before accessing g1.")
+        return self._g1
+    @property
+    def g2(self):
+        if not self._computed:
+            raise RuntimeError("Run kats(g) before accessing g2.")
+        return self._g2
+    @property
+    def g3(self):
+        if not self._computed:
+            raise RuntimeError("Run kats(g) before accessing g3.")
+        return self._g3
+    @property
+    def g3_old(self):
+        if not self._computed:
+            raise RuntimeError("Run kats(g) before accessing g3_old.")
+        return self._g3_old
+    @property
+    def g4(self):
+        if not self._computed:
+            raise RuntimeError("Run kats(g) before accessing g4.")
+        return self._g4
+    @property
+    def g5(self):
+        if not self._computed:
+            raise RuntimeError("Run kats(g) before accessing g5.")
+        return self._g5
+    @property
+    def g6(self):
+        if not self._computed:
+            raise RuntimeError("Run kats(g) before accessing g6.")
+        return self._g6
+    @property
+    def gF(self):
+        if not self._computed:
+            raise RuntimeError("Run kats(g) before accessing gF.")
+        return self._gF
+    
+    def cf1_derivative(self, g):
+        ''' expects g to be of shape (N_s, N_alpha, N_w)'''
+        g1 = np.zeros((self.N_s - 1, self.N_alpha, self.N_w), dtype=g.dtype)
+        # formula (46) Noo et al. 2003
+        # forward difference of the projection data
+        for k in tqdm(range(self.N_s - 1), desc='CF1: Derivative'):
+            d_proj = (g[k + 1, :-1, :-1] - g[k, :-1, :-1] +
+                      g[k + 1, 1:, :-1] - g[k, 1:, :-1]) / (2 * self.geometry.motion_partition.cell_sides[k])
+            d_col = (g[k, 1:, :-1] - g[k, :-1, :-1] +
+                     g[k+1, 1:, :-1] - g[k+1, :-1, :-1]) / (2 * (self.dalpha))
+            g1[k, :-1, :-1] = d_proj + d_col 
+        g1_full = np.zeros((self.N_s, self.N_alpha, self.N_w), dtype=g1.dtype)
+        g1_full[:-1] = g1
+        g1_full[-1] = g1[-1]
+        return g1_full
+    
+    def cf1_derivative_v2(self, g):
+        # formula (2.4) of Katsevich 2011 using r=1
+        g1us = np.zeros((self.N_s - 2, self.N_alpha-1, self.N_w), dtype=g.dtype)
+        # for i in tqdm(range(self.N_alpha - 1), desc='CF1: Derivative'):
+        #     g1us[:, i, :] = (g[2:, i+1, :] - g[:-2, i, :]) \
+        #    + (1/self.ds - 1) * (g[2:, i, :] - g[:-2, i+1, :]) \
+        #    + (1/self.ds + 2 / self.dalpha - 2) * (g[1:self.N_s-1, i+1, :] - g[1:self.N_s-1, i, :]) 
+        for k in tqdm(range(1, self.N_s - 1), desc='CF1: Derivative'):
+            g1us[k-1, :, :] = (g[k+1, 1:, :] - g[k-1, :-1, :]) \
+            + (1/self.ds[k] - 1) * (g[k+1, :-1, :] - g[k - 1, 1:, :]) \
+            + (1/self.ds[k] + 2 / self.dalpha - 2) * (g[k, 1:, :] - g[k, :-1, :])
+
+        g1us *=0.5
+        g1us_interp = 0.5 * (g1us[:, :, :-1] + g1us[:, :, 1:])  # shape: [N_s-2, N_w-1, N_u-1]
+
+        g1 = np.zeros((self.N_s, self.N_alpha, self.N_w), dtype=g.dtype)
+        g1[1:self.N_s-1, :-1, :-1] = g1us_interp
+        
+        return g1
+    
+    def cf2_length_weighting(self, g1):
+        # formula (24) Noo et al. 2003
+        length_weight = self.D / np.sqrt(self.D*self.D + self.w_vals*self.w_vals)
+        g2 = np.empty_like(g1, dtype=np.float64)
+        g2 = g1 * length_weight 
+        return g2
+        
+    def cf3_forward_rebin(self, g2):
+        # use the precomputed rebinning rows and interpolate the values
+        # on the detector rows to find the values on the rebinning rows.
+        # see formula (25) Noo et al. 2003.
+        g3 = np.zeros((self.N_s, self.N_alpha, self.detector_rebin_rows), dtype=g2.dtype)
+        for i in tqdm(range(self.N_alpha), desc="CF3: Forward rebin"):
+            for k in range(self.N_s):
+                interp = interp1d(self.w_vals, g2[k, i, :], bounds_error=False, fill_value=0.0)
+                g3[k, i, :] = interp(self.fwd_rebin_w[i])
+        return g3
+    
+    def cf4_hilbert_transform(self, g3):
+        # compute hilbert kernal and convolve with data on ribinning rows
+        # see formula (50), (51) in Noo et al. 2003 for the kernel, 
+        # and formula (52) in Noo et al. 2003 for the convolution.
+        def discrete_hilbert_kernel(npoints, window='rect'):
+            assert npoints % 2 == 1
+            M = npoints // 2      
+            tau_vals = np.arange(-M, M+1)
+            def A(u):
+                if window == 'rect':
+                    return 1.
+                elif window == 'hann':
+                    return np.cos(np.pi * u / 2)**2
+                else:
+                    raise ValueError('Unknown window type') 
+            H = np.zeros_like(tau_vals, dtype=np.float64)
+            for idx, tau in enumerate(tau_vals):
+                if tau == 0:
+                    H[idx] = 0.0
+                else:
+                    u = np.linspace(0, 1, 100)
+                    integrand = np.sin(np.pi * tau * u) * A(u)
+                    integral = np.trapz(integrand, u)
+                    H[idx] = (tau * self.dalpha) / (np.sin(tau * self.dalpha)) * integral
+            return H 
+        
+        kernel = discrete_hilbert_kernel(npoints=101, window='hann')
+        g4 = np.empty_like(g3)
+        for k in tqdm(range(self.N_s), desc='CF4: Hilbert transform'):
+            for rebin_row in range(self.detector_rebin_rows):
+                conv_result = np.convolve(g3[k, :, rebin_row], kernel, mode='same')
+                g4[k, :, rebin_row] = conv_result
+        return g4
+    
+    def cf5_backward_rebin(self, g4):
+        # reverse the rebinning process. Use the precomputation 
+        # of the weights c, 1-c and of the map rebinning rows -> detector rows.
+        # see formula (55) Noo et al. 2003.
+        g5 = np.zeros((self.N_s, self.N_alpha, self.N_w), dtype=g4.dtype)
+        for k in tqdm(range(0, self.N_s), desc="CF5: Reverse rebin"):
+
+            for col in range(self.N_alpha//2, self.N_alpha):
+                row0 = self.rebin_row[col]
+                row1 = row0 + 1
+                g5[k, col, :] = (self.rebin_fracs_1[col] * g4[k, col, row0] +
+                                 self.rebin_fracs_0[col] * g4[k, col, row1])
+            for col in range(self.N_alpha//2):
+                row0 = self.rebin_row[col] 
+                rowmin1 = row0 - 1
+                g5[k, col, :] = (self.rebin_fracs_1[col] * g4[k, col, rowmin1] +
+                                 self.rebin_fracs_0[col] * g4[k, col, row0])
+        return g5
+    
+    def cf6_cosine_weighting(self, g5):
+        # apply cosine weighting to the data
+        # see formula (30) Noo et al. 2003.
+        alpha_weight = np.cos(self.alpha_vals)[np.newaxis, :, np.newaxis]
+        return g5 * alpha_weight
+    
+    def cf7_td_weighting(self, g6):
+        # Apply Tam_Danielson window to the data. Compute the 
+        # indicator function maskTD and apply it to the data.
+        # see formula (57) Noo et al. 2003.
+
+        a=float(0.025) # smoothing width
+
+        # formula (36) Noo et al. 2003
+        w_bottom = - self.P * self.D / (2 * np.pi * self.Rs) * (np.pi/2 + self.alpha_vals) / np.cos(self.alpha_vals)
+        w_top    =   self.P * self.D / (2 * np.pi * self.Rs) * (np.pi/2 - self.alpha_vals) / np.cos(self.alpha_vals)
+        
+        w_top = w_top[:, np.newaxis]      
+        w_bottom = w_bottom[:, np.newaxis]
+        if self.P == 0:
+            raise ValueError('Tam-Danielson window is only defined with ' '`pitch != 0`')
+        if a < 0:
+            raise ValueError('`smoothing_width` should be a positive float')
+
+        W, A = np.meshgrid(self.w_vals, self.alpha_vals, indexing='xy')  
+        mask = np.zeros(shape=(self.N_alpha, self.N_w), dtype=np.float32)
+
+        w_bottom_low = (w_bottom - a * self.dw).reshape(-1, 1) 
+        w_bottom_high = (w_bottom + a * self.dw).reshape(-1, 1)
+        w_top_low = (w_top - a * self.dw).reshape(-1, 1)
+        w_top_high = (w_top + a * self.dw).reshape(-1, 1)
+
+        region1 = ( W < w_bottom_low ) 
+        region2 = ( w_bottom_low <= W ) & ( W < w_bottom_high )
+        region3 = ( w_bottom_high <= W ) & ( W <= w_top_low )
+        region4 = ( w_top_low < W ) & ( W <= w_top_high )
+        region5 = ( w_top_high < W )
+
+        # region1 and region5 stay at 0
+        mask[region2] = (W - w_bottom_low)[region2] / (2 * a * self.dw)
+        mask[region3] = 1
+        mask[region4] = (w_top_high - W)[region4] / (2 * a * self.dw)
+
+        maskTD = np.broadcast_to(mask, (self.N_s, self.N_alpha, self.N_w))
+        return g6 * maskTD
+
 class KatsevichFilterCurved(Operator):
     def __init__(self, ray_trafo):
         self.ray_trafo = ray_trafo
@@ -1056,7 +1372,6 @@ def katsevich_filter_op(ray_trafo):
         return KatsevichFilterCurved(ray_trafo)
 
 
-
 def fbp_filter_op(ray_trafo, padding=True, filter_type='Ram-Lak',
                   frequency_scaling=1.0):
     """Create a filter operator for FBP from a `RayTransform`.
@@ -1278,6 +1593,11 @@ def fbp_op(ray_trafo, padding=True, filter_type='Ram-Lak',
     tam_danielson_window : Windowing for helical data.
     parker_weighting : Windowing for overcomplete fan-beam data.
     """
+    if filter_type == 'Katsevich':
+        return ray_trafo.adjoint_kats * katsevich_filter_op(ray_trafo)
+    else:
+        return ray_trafo.adjoint * fbp_filter_op(ray_trafo, padding, filter_type,
+                                                 frequency_scaling)
     if filter_type == 'Katsevich':
         return ray_trafo.adjoint_kats * katsevich_filter_op(ray_trafo)
     else:
