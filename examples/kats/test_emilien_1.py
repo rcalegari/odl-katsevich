@@ -31,12 +31,13 @@ astra_backend = True
 '''try fetching the filtered sinogram if available. if yes, use it and run backprojection on it,
 otherwise, filter, save it and run backprojection on the filtered sinogram.
 '''
+# change to the folder where the sino/angles/shifts are stored!!
 sample_path = Path('/home/rosaca/code/pine_16_1')
 filtdata_fbp_path = sample_path.joinpath('filtered_fbp.npy')
 if use_slice:
     slice_k = 1/2
     print(f"Creating ray transform operator for slice {slice_k}")
-    filtdata_kats_path = sample_path.joinpath(f'filtered_kats_slice_{slice_k}.npy')
+    filtdata_kats_path = sample_path.joinpath(f'filtered_kats_slice_1_2.npy')
 elif use_interval:
     slice_bounds = [150., 200.]
     filtdata_kats_path = sample_path.joinpath(f'filtered_kats_interval_{slice_bounds[0]}_{slice_bounds[1]}.npy')
@@ -292,7 +293,7 @@ if astra_backend:
 
         # print(f"Backprojecting angle {k + k_min} of {k_max + 1}")
         backproj = forward_op_k.adjoint(filt_sino_kats[k, :, :], angle_weighting=angles_old[k+1] - angles_old[k])
-        # backproj *= voxel_weights
+        backproj *= voxel_weights
         if k == 0:
             kats_reco = backproj
         else:
