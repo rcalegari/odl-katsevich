@@ -23,7 +23,7 @@ from odl.tomo.backends.astra_cpu import AstraCpuImpl
 from odl.tomo.backends.astra_cuda import AstraCudaImpl
 from odl.tomo.backends.skimage_radon import SkImageImpl
 from odl.tomo.geometry import Geometry
-from odl.util import is_string
+from odl.util import is_string, is_numeric_dtype, is_floating_dtype
 
 # RAY_TRAFO_IMPLS are used by `RayTransform` when no `impl` is given.
 # The last inserted implementation has highest priority.
@@ -84,6 +84,11 @@ class RayTransform(Operator):
         The ASTRA backend is faster if data are given with
         ``dtype='float32'`` and storage order 'C'. Otherwise copies will be
         needed.
+        
+        `angle_weighting` is provided to take care of partition of one angle
+        only, which is used for backprojection angle by angle. The weighting
+        is the distance between two angles in radians, it's computed externally
+        and passed to the operator. 
         """
         if not isinstance(vol_space, DiscretizedSpace):
             raise TypeError(
@@ -98,6 +103,10 @@ class RayTransform(Operator):
 
         # Generate or check projection space
         proj_space = kwargs.pop('proj_space', None)
+        # provide angle weighting if there is only one angle in partition
+        # for backprojection angle by angle
+        self.angle_weighting = kwargs.pop('angle_weighting', None)
+
         if proj_space is None:
             dtype = vol_space.dtype
 
@@ -116,8 +125,14 @@ class RayTransform(Operator):
                 # The needed partition property is available since
                 # commit a551190d, but weighting is not adapted yet.
                 # See also issue #286
-                extent = float(geometry.partition.extent.prod())
+                
+                extent_arr = geometry.partition.extent
+                if geometry.motion_partition.ndim == 1:
+                    if self.angle_weighting:
+                        extent_arr[0] = self.angle_weighting
+                extent = float(extent_arr.prod())
                 size = float(geometry.partition.size)
+                # mm3 of the projection space / number of voxels in projection space
                 weighting = extent / size
             else:
                 raise NotImplementedError('unknown weighting of domain')
@@ -379,7 +394,40 @@ class RayTransform(Operator):
             )
 
         return self._adjoint
+    @property
+    def adjoint_kats(self):
+        """Katsevich voxel-wise backprojection.
+        
+        Returns
+        -------
+        adjoint_kats : `KatsevichBackProjection`
+        """
+        if not hasattr(self, '_adjoint_kats') or self._adjoint_kats is None:
+            # bring `self` into scope to prevent shadowing in inline class
+            ray_trafo = self
+            class KatsevichBackProjection(Operator):
+                """Katsevich backprojection operator."""
+                def __init__(self):
+                    super().__init__(domain=ray_trafo.range,
+                                    range=ray_trafo.domain, linear=True)                
+                    self.grid = ray_trafo.domain.grid 
+                    self.mesh = self.grid.meshgrid 
+                def _call(self, x, out=None, **kwargs):
+                    # x is the filtered data
+                    return ray_trafo.get_impl(
+                        ray_trafo.use_cache
+                    ).call_backward_kats(x, out, **kwargs)
 
+                @property
+                def geometry(self):
+                    return ray_trafo.geometry
+                @property
+                def adjoint(self):
+                    return ray_trafo
+    
+            self._adjoint_kats = KatsevichBackProjection()
+        
+        return self._adjoint_kats
 
 if __name__ == '__main__':
     from odl.util.testutils import run_doctests
