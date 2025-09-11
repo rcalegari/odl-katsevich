@@ -101,3 +101,7 @@ target/
 *.pyproj.user
 *.pyperf
 *.psess
+
+*.mp4
+*.npy
+
