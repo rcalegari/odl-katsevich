@@ -330,6 +330,8 @@ class AstraCudaImpl:
         """
         import cupy as cp
         from tqdm import tqdm
+        
+        angle_weighting = kwargs.pop('angle_weighting', None) 
 
         with self._mutex:
             assert x in self.proj_space.real_space
@@ -531,6 +533,9 @@ class AstraCudaImpl:
             raw = rec_volume_cp.get()
             rec_volume = rec_volume_cp.get().astype(np.float32, order='C')
             assert rec_volume.shape == self.vol_space.shape, f"Shape mismatch: got {rec_volume.shape}, expected {self.vol_space.shape}"
+            rec_volume *= astra_cuda_bp_scaling_factor(
+                self.proj_space, self.vol_space, self.geometry, angle_weighting
+            )
             return rec_volume
         
     def __del__(self):
@@ -572,10 +577,12 @@ def astra_cuda_bp_scaling_factor(proj_space, vol_space, geometry, angle_weightin
     # angle interval weight by approximate cell volume
     if geometry.motion_partition.ndim == 1:
         if angle_weighting is None:
-            raise ValueError(
-                'angle_weighting must be provided for angle partition with only one element'
-            )
-        angle_extent = angle_weighting
+            # raise ValueError(
+            #     'angle_weighting must be provided for angle partition with only one element'
+            # )
+            angle_extent = geometry.motion_partition.extent
+        else:
+            angle_extent = angle_weighting
     else:
         angle_extent = geometry.motion_partition.extent
     num_angles = geometry.motion_partition.shape

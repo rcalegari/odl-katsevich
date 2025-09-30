@@ -1,0 +1,32 @@
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [ -4.02821997,  -4.02276579,  -4.01731166, ...,  63.45602639,
+          63.46148045,  63.46693475]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=34.435258,
+    offset_along_axis=16.136827,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Reconstruction space:
+uniform_discr(
+    [-190.  , -190.  ,   19.35], [ 190.  ,  190.  ,  338.35],
+    (512, 512, 319)
+)
+
+Using FFS: False
+Time for FBP: 185.662 seconds
+Time for FBP: 188.237 seconds
+Time for KATS initialization: 2.764 seconds
+Time for KATS filter: 463.600 seconds
+Time for KATS backprojection: 25.512 seconds
+Total time for KATS reconstruction: 491.876 seconds
+Time for KATS initialization: 2.819 seconds
+Time for KATS filter: 490.215 seconds
+Time for KATS backprojection: 25.187 seconds
+Total time for KATS reconstruction: 518.220 seconds

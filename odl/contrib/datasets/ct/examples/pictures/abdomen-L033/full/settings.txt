@@ -1,0 +1,69 @@
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [  -3.86154095,   -3.85881391,   -3.85608682, ...,  104.72793636,
+          104.73066339,  104.73339055]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=30.663491,
+    offset_along_axis=27.37527,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Reconstruction space:
+uniform_discr(
+    [-190., -190.,   30.], [ 190.,  190.,  516.], (512, 512, 162)
+)
+
+Using FFS: False
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [  -3.86154095,   -3.85881391,   -3.85608682, ...,  104.72793636,
+          104.73066339,  104.73339055]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=30.663491,
+    offset_along_axis=27.37527,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Number of views: 39822
+Reconstruction space:
+uniform_discr(
+    [-190., -190.,   30.], [ 190.,  190.,  516.], (512, 512, 162)
+)
+
+Using FFS: True
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [  -3.86154095,   -3.85881391,   -3.85608682, ...,  104.72793636,
+          104.73066339,  104.73339055]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=30.663491,
+    offset_along_axis=27.37527,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Number of views: 39822
+Reconstruction space:
+uniform_discr(
+    [-190., -190.,   30.], [ 190.,  190.,  516.], (512, 512, 162)
+)
+
+Using FFS: False
+Time for FBP: 584.940 seconds
+FBP PSNR: 29.279 dB
+FBP RMSE: 0.003
+FBP SSIM: 0.687

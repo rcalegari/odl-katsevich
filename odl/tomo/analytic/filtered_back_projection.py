@@ -18,7 +18,7 @@ from tqdm import tqdm
 import odl
 
 __all__ = ('fbp_op', 'fbp_filter_op', 'katsevich_filter_op', 'tam_danielson_window', 'td_window_curved',
-           'parker_weighting')
+           'parker_weighting', 'ff7_td_weighting')
 
 
 def _axis_in_detector(geometry):
@@ -102,7 +102,6 @@ def _fbp_filter(norm_freq, filter_type, frequency_scaling):
     indicator = (norm_freq <= frequency_scaling)
     filt *= indicator
     return filt
-
 
 def tam_danielson_window(ray_trafo, smoothing_width=0.05, n_pi=1):
     """Create Tam-Danielson window from a `RayTransform`.
@@ -215,6 +214,66 @@ def tam_danielson_window(ray_trafo, smoothing_width=0.05, n_pi=1):
 
     return ray_trafo.range.element(window_fcn) / n_pi
 
+def ff7_td_weighting(ray_trafo, g5):
+    # Apply Tam_Danielson window to the data. Compute the 
+    # indicator function maskTD and apply it to the data.
+    # see formula (57) Noo et al. 2003.
+    geometry = ray_trafo.geometry
+    P = geometry.pitch
+    D = geometry.src_radius + geometry.det_radius
+    Rs = geometry.src_radius
+    w_vals = geometry.det_partition.coord_vectors[0]
+    u_vals = geometry.det_partition.coord_vectors[1]
+    dw = w_vals[1] - w_vals[0]
+    N_w = len(w_vals)
+    N_u = len(u_vals)
+    N_s = len(geometry.motion_partition.coord_vectors[0])
+    a=float(0.025)
+
+    # formula (78) Noo et al. 2003
+    w_bottom = - P / (2 * np.pi * Rs * D) * (u_vals**2 + D**2) * (np.pi/2 + np.arctan(u_vals / D))
+    w_top    =   P / (2 * np.pi * Rs * D) * (u_vals**2 + D**2) * (np.pi/2 - np.arctan(u_vals / D))
+    
+    w_bottom = np.reshape(w_bottom, (1, -1))
+    w_top    = np.reshape(w_top, (1, -1))
+
+    if P == 0:
+        raise ValueError('Tam-Danielson window is only defined with ' '`pitch != 0`')
+    if a < 0:
+        raise ValueError('`smoothing_width` should be a positive float')
+
+    W, U = np.meshgrid(w_vals, u_vals, indexing='ij')  # (N_w, N_u)
+    mask = np.zeros(shape=(N_w, N_u), dtype=np.float32)
+
+    # w_bottom_low = (w_bottom - a * dw).reshape(-1, 1) 
+    # w_bottom_high = (w_bottom + a * dw).reshape(-1, 1)
+    # w_top_low = (w_top - a * dw).reshape(-1, 1)
+    # w_top_high = (w_top + a * dw).reshape(-1, 1)
+    w_bottom_low = w_bottom - a * dw
+    w_bottom_high = w_bottom + a * dw
+    w_top_low = w_top - a * dw
+    w_top_high = w_top + a * dw
+
+    region2 = ( w_bottom_low <= W ) & ( W < w_bottom_high )
+    region3 = ( w_bottom_high <= W ) & ( W <= w_top_low )
+    region4 = ( w_top_low < W ) & ( W <= w_top_high )
+
+    # region1 and region5 stay at 0
+    mask[region2] = (W - w_bottom_low)[region2] / (2 * a * dw)
+    mask[region3] = 1
+    mask[region4] = (w_top_high - W)[region4]/ (2 * a * dw)
+    
+    maskTD = np.broadcast_to(mask, (N_s, N_w, N_u))
+    # plot the mask
+    import matplotlib.pyplot as plt
+    plt.imshow(maskTD[0, :, :], aspect='auto', cmap='gray')
+    plt.colorbar()
+    plt.title('Tam-Danielson window')
+    plt.xlabel('Detector column (u)')
+    plt.ylabel('Detector row (w)')
+    plt.savefig('/home/rosaca/code/odl/examples/kats/phantom_simple/flat/tam_danielson_window_ff7.svg')
+    plt.close()
+    return g5 * maskTD
 
 def td_window_curved(ray_trafo, g6, smoothing_width=0.025, print_tqdm=False, force_const=False):
     # Apply Tam_Danielson window to the data. Compute the 
@@ -269,20 +328,20 @@ def td_window_curved(ray_trafo, g6, smoothing_width=0.025, print_tqdm=False, for
         if exc_bot:
             w_bot_interp = - P * D / (2 * np.pi * R) * (np.pi/2 + alpha_vals) / np.cos(alpha_vals)
         else:
-            interp_bot = interp1d(a_bot, w_bot, bounds_error=False, fill_value=(w_bot[0], w_bot[-1]))
+            interp_bot = interp1d(a_bot, w_bot, bounds_error=False, fill_value='extrapolate')
             w_bot_interp = interp_bot(alpha_vals)
         if exc_top:
             w_top_interp =   P * D / (2 * np.pi * R) * (np.pi/2 - alpha_vals) / np.cos(alpha_vals)
         else:
-            interp_top = interp1d(a_top, w_top, bounds_error=False, fill_value=(w_top[0], w_top[-1]))
+            interp_top = interp1d(a_top, w_top, bounds_error=False, fill_value='extrapolate')
             w_top_interp = interp_top(alpha_vals)
         return w_bot_interp, w_top_interp
 
     if not const_pitch:
-        delta_s_edge = 2*np.arccos(fov_radius / R)  # R > fov!!!
+        delta_s_edge = np.arccos(fov_radius / R)  # R > fov!!!
         ds_plus = np.linspace(delta_s_edge, 2 * np.pi - delta_s_edge, 1000)
         ds_min  = np.linspace(delta_s_edge - 2 * np.pi, - delta_s_edge, 1000)
-        # --- main loop over source angles ---------------------------------------
+
         if print_tqdm:
             print('non-constant pitch case')
             range_obj = tqdm(range(N_s), desc='Computing TD window')
@@ -337,7 +396,6 @@ def td_window_curved(ray_trafo, g6, smoothing_width=0.025, print_tqdm=False, for
 
         maskTD = np.broadcast_to(mask, (N_s, N_alpha, N_w))
     return g6 * maskTD
-
 
 def parker_weighting(ray_trafo, q=0.25):
     """Create parker weighting for a `RayTransform`.
@@ -807,6 +865,8 @@ class KatsevichFilterCurved(Operator):
         # formula (48) Noo et al. 2003
         M = int((np.pi/2 + alpha_m) * self.D * self.P / (2 * self.dw * self.Rs) * (np.cos(alpha_m) \
                 + np.sin(alpha_m)*(np.tan(alpha_m) + (alpha_m + np.pi*0.5) * np.sin(alpha_m) / (np.cos(alpha_m))**2)))
+        if M <= 0:
+            raise ValueError('M should be a positive integer, got {}'.format(M))
         self.detector_rebin_rows = 2*M+1 # use 128 to compare to Pykatsevich 
         self.psi_vals = np.linspace(-np.pi/2 - alpha_m, np.pi/2 + alpha_m, self.detector_rebin_rows) 
         
@@ -847,24 +907,12 @@ class KatsevichFilterCurved(Operator):
                 ev =   - self.geometry.det_to_src(angle, [0, 0])
                 y_s = self.geometry.src_position(angle)
 
-                # if angle - 1e-4 >= angles[0] and angle + 1e-4 <= angles[-1]:
-                #     y_s_plus = self.geometry.src_position(angle + 1e-4)
-                #     y_s_minus = self.geometry.src_position(angle - 1e-4)
-                #     dy = (y_s_plus - y_s_minus) / (2*1e-4)
-                #     ddy = (y_s_plus - 2*y_s + y_s_minus) / (1e-4**2)
-
                 for j, phi in enumerate(self.psi_vals):  
                     if angle + 2*phi > angles[-1] or angle + 2*phi < angles[0]:
                         continue
                     y_phi = self.geometry.src_position(angle + phi)
                     y_2phi = self.geometry.src_position(angle + 2 * phi)
-                    
-                    # if abs(phi) < 1e-4 and angle - 1e-4 >= angles[0] and angle + 1e-4 <= angles[-1]:
-                    #     # limit case
-                    #     cross = np.cross(dy, ddy)
-                    # else:
-                    #    cross = np.cross(y_phi - y_s, y_2phi - y_s)
-                    
+
                     cross = np.cross(y_phi - y_s, y_2phi - y_s)
 
                     if np.linalg.norm(cross) < 1e-8:
@@ -917,7 +965,7 @@ class KatsevichFilterCurved(Operator):
 
             self.rebin_fracs_1 -= self.rebin_fracs_0
         
-        else:
+        else: # non-constant pitch
             self.rebin_row = np.zeros((self.N_s, self.N_alpha, self.N_w), dtype=np.int32)
             # self.rebin_fracs_0 = c(alpha, w, l)
             self.rebin_fracs_0 = np.zeros_like(self.rebin_row, dtype=np.float32)
@@ -959,18 +1007,25 @@ class KatsevichFilterCurved(Operator):
         print("KatsevichFilterCurved initialized.")
 
     def _call(self, g, out=None, **kwargs):
-        
+        '''
+        parameter `diff` states which version of the differentiation scheme to use:
+        - 1: cf1_derivative_NPH Noo-Pack-Heurscher scheme,
+        - 2: cf1_derivative_K Katsevich scheme.
+        See [1] for more details.
+
+        [1] Faridani A., Hass. R, On Numerical Analysis of View-Dependent Derivatives in Computed Tomography. 2015.
+        '''
         diff = kwargs.get('diff', None)
         print_tqdm = kwargs.get('print_tqdm', True)
         g = np.asarray(g)
         if diff == 1:
-            self._g1 = self.cf1_derivative(g, print_tqdm)
-            print("Using cf1_derivative v1")
+            self._g1 = self.cf1_derivative_NPH(g, print_tqdm)
+            print("Using NPH derivative scheme")
         elif diff == 2:
-            self._g1 = self.cf1_derivative_v2(g, print_tqdm)
-            print("Using cf1_derivative v2")
+            self._g1 = self.cf1_derivative_K(g, print_tqdm)
+            print("Using K derivative scheme")
         else:
-            self._g1 = self.cf1_derivative_v2(g, print_tqdm)
+            self._g1 = self.cf1_derivative_K(g, print_tqdm)
 
         self._g2 = self.cf2_length_weighting(self._g1)
 
@@ -992,14 +1047,6 @@ class KatsevichFilterCurved(Operator):
 
         self._g6 = self.cf6_cosine_weighting(self._g5)
 
-        
-        # if self.const_pitch:
-        #     print('cf7 with constant pitch')
-        #     self._gF = self.cf7_td_weighting(self._g6)
-        # else:
-        #     print('cf7 with non constant pitch')
-        #     self._gF = self.td_weighting_nonconst_pitch(self._g6, print_tqdm)
-
         self._computed = True
         result = self.ray_trafo.range.element(self._g6)
 
@@ -1008,7 +1055,6 @@ class KatsevichFilterCurved(Operator):
             return out
         return result
 
-    
     @property
     def g1(self):
         if not self._computed:
@@ -1044,21 +1090,16 @@ class KatsevichFilterCurved(Operator):
         if not self._computed:
             raise RuntimeError("Run kats(g) before accessing g6.")
         return self._g6
-    @property
-    def gF(self):
-        if not self._computed:
-            raise RuntimeError("Run kats(g) before accessing gF.")
-        return self._gF
     
-    def cf1_derivative(self, g, print_tqdm):
+    def cf1_derivative_NPH(self, g, print_tqdm):
         ''' expects g to be of shape (N_s, N_alpha, N_w)'''
         g1 = np.zeros((self.N_s - 1, self.N_alpha, self.N_w), dtype=g.dtype)
         # formula (46) Noo et al. 2003
         # forward difference of the projection data
-        range_obj = tqdm(range(1, self.N_s-1), desc="CF1: Derivative (v2)") if print_tqdm else range(0, self.N_s)
+        range_obj = tqdm(range(1, self.N_s-1), desc="CF1: Derivative (NPH)") if print_tqdm else range(0, self.N_s)
         for k in range_obj:
             d_proj = (g[k + 1, :-1, :-1] - g[k, :-1, :-1] +
-                      g[k + 1, 1:, :-1] - g[k, 1:, :-1]) / (2 * self.geometry.motion_partition.cell_sides[k])
+                      g[k + 1, 1:, :-1] - g[k, 1:, :-1]) / (2 * self.geometry.motion_partition.cell_sides[0])
             d_col = (g[k, 1:, :-1] - g[k, :-1, :-1] +
                      g[k+1, 1:, :-1] - g[k+1, :-1, :-1]) / (2 * (self.dalpha))
             g1[k, :-1, :-1] = d_proj + d_col 
@@ -1067,10 +1108,10 @@ class KatsevichFilterCurved(Operator):
         g1_full[-1] = g1[-1]
         return g1_full
     
-    def cf1_derivative_v2(self, g, print_tqdm):
+    def cf1_derivative_K(self, g, print_tqdm):
         # formula (2.4) of Katsevich 2011 using r=1
         g1us = np.zeros((self.N_s - 2, self.N_alpha-1, self.N_w), dtype=g.dtype)
-        range_obj = tqdm(range(1, self.N_s-1), desc="CF1: Derivative (v2)") if print_tqdm else range(1, self.N_s-1)
+        range_obj = tqdm(range(1, self.N_s-1), desc="CF1: Derivative (K)") if print_tqdm else range(1, self.N_s-1)
         for k in range_obj:
             g1us[k-1, :, :] = (g[k+1, 1:, :] - g[k-1, :-1, :]) \
             + (1/self.ds[k] - 1) * (g[k+1, :-1, :] - g[k - 1, 1:, :]) \
@@ -1353,6 +1394,12 @@ class KatsevichFilterCurved(Operator):
 
 
 class KatsevichFilterFlat(Operator):
+    '''
+    Katsevich filter for flat detector geometry.
+    This class has been implemented  for the simple case with constant pitch.
+    For non-constant pitch, see the curved detector filter class.
+    '''
+
     def __init__(self, ray_trafo):
         self.ray_trafo = ray_trafo
         self.geometry = ray_trafo.geometry
@@ -1435,6 +1482,7 @@ class KatsevichFilterFlat(Operator):
         # initialize as ODL operator
         domain = self.ray_trafo.range
         op_range = self.ray_trafo.range
+        print("KatsevichFilterFlat initialized.")
         super().__init__(domain, op_range, linear=False)
 
     def _call(self, g, out=None, **kwargs):
@@ -1454,9 +1502,8 @@ class KatsevichFilterFlat(Operator):
         self._g3 = self.ff3_forward_rebin(self._g1)
         self._g4 = self.ff4_hilbert_transform(self._g3)
         self._g5 = self.ff5_backward_rebin(self._g4)
-        self._gF = self.ff7_td_weighting_v2(self._g5)
         self._computed = True
-        result = self.ray_trafo.range.element(self._gF)
+        result = self.ray_trafo.range.element(self._g5)
 
         if out is not None:
             out[:] = result
@@ -1483,11 +1530,6 @@ class KatsevichFilterFlat(Operator):
         if not self._computed:
             raise RuntimeError("Run kats(g) before accessing g5.")
         return self._g5
-    @property
-    def gF(self):
-        if not self._computed:
-            raise RuntimeError("Run kats(g) before accessing gF.")
-        return self._gF
     
     def ff1_derivative(self, g):
         # derivative (forward difference) and length correction steps.
@@ -1508,7 +1550,7 @@ class KatsevichFilterFlat(Operator):
             d_proj = (g[k+1, :-1, :-1] - g[k, :-1, :-1] +
                       g[k+1, 1:, :-1] - g[k, 1:, :-1] +
                       g[k+1, :-1, 1:] - g[k, :-1, 1:] +
-                      g[k+1, 1:, 1:] - g[k, 1:, 1:]) / (4 * self.geometry.motion_partition.cell_sides[k])
+                      g[k+1, 1:, 1:] - g[k, 1:, 1:]) / (4 * self.geometry.motion_partition.cell_sides[0])
             d_row = (g[k, 1:, :-1] - g[k, :-1, :-1] +
                  g[k, 1:, 1:] - g[k, :-1, 1:] +
                  g[k + 1, 1:, :-1] - g[k + 1, :-1, :-1] +
@@ -1665,9 +1707,11 @@ class KatsevichFilterFlat(Operator):
 
 
 def katsevich_filter_op(ray_trafo):
-    if ray_trafo.geometry.det_curvature_radius is None:   
+    if ray_trafo.geometry.det_curvature_radius is None: 
+        # print('redirect to flat filter')  
         return KatsevichFilterFlat(ray_trafo)
     else:
+        # print('redirect to curved filter')
         return KatsevichFilterCurved(ray_trafo)
 
 

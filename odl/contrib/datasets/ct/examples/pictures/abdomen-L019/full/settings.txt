@@ -1,0 +1,71 @@
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [  -2.29074463,   -2.28801754,   -2.28529051, ...,  144.81051344,
+          144.81324047,  144.8159675 ],
+        nodes_on_bdry=(False, True)
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=22.975932,
+    offset_along_axis=264.93664,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Reconstruction space:
+uniform_discr(
+    [-220.  , -220.  ,  272.25], [ 220.  ,  220.  ,  779.25],
+    (512, 512, 169)
+)
+
+Using FFS: True
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [  -2.29074463,   -2.28801754,   -2.28529051, ...,  144.81051344,
+          144.81324047,  144.8159675 ],
+        nodes_on_bdry=(False, True)
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=22.975932,
+    offset_along_axis=264.93664,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Number of views: 53944
+Reconstruction space:
+uniform_discr(
+    [-220.  , -220.  ,  272.25], [ 220.  ,  220.  ,  779.25],
+    (512, 512, 169)
+)
+
+Using FFS: True
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [  -2.29074463,   -2.28801754,   -2.28529051, ...,  144.81051344,
+          144.81324047,  144.8159675 ],
+        nodes_on_bdry=(False, True)
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=22.975932,
+    offset_along_axis=264.93664,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Number of views: 53944
+Reconstruction space:
+uniform_discr(
+    [-220.  , -220.  ,  272.25], [ 220.  ,  220.  ,  779.25],
+    (512, 512, 169)
+)
+
+Using FFS: False

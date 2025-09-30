@@ -1,7 +1,12 @@
-from examples.kats.pykats_config import create_pykats_config, create_space_geom
+'''
+Script to test the Katsevich algorithm implementation in ODL
+on artificial data
+'''
+from examples.kats.pykats_config import create_pykats_config
 from examples.kats.test_flat import katsevich_filter_flat
 from examples.kats.test_curved import katsevich_filter_curved
-from examples.kats.utils import save_intensity_row, save_intensity_error_rows
+from examples.kats.utils import save_intensity_row, save_intensity_error_rows, save_intensity_error_derivative_comparison
+from examples.kats.utils import plot_psnr, plot_ssim, plot_rmse
 
 import os
 import numpy as np
@@ -29,8 +34,11 @@ phantom_type = 'shepp' # 'shepp', 'ellipsoid', 'simple'
 step = 10
 interval = 1
 curved = True
-t = 1
-video = True
+t = 2
+video = False
+new = False
+new1 = False
+num_angles = 300
 
 det = 'curved' if curved else 'flat'
 

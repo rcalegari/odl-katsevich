@@ -1,0 +1,62 @@
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [-2.63981047, -2.63708344, -2.63435635, ...,  5.5332391 ,  5.53596613,
+          5.5386934 ]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=22.940115,
+    offset_along_axis=425.95804,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Reconstruction space:
+uniform_discr(
+    [-220.  , -220.  ,  272.25], [ 220.  ,  220.  ,  779.25],
+    (512, 512, 169)
+)
+
+Using FFS: False
+Time for FBP: 45.269 seconds
+Time for FBP: 49.382 seconds
+Time for FBP: 54.131 seconds
+Time for FBP: 54.176 seconds
+Time for FBP: 54.782 seconds
+Time for FBP: 55.571 seconds
+Time for FBP: 55.521 seconds
+Time for FBP: 55.923 seconds
+Time for KATS initialization: 4.083 seconds
+Time for KATS filter: 135.259 seconds
+Time for KATS backprojection: 5.160 seconds
+Total time for KATS reconstruction: 144.503 seconds
+Time for KATS initialization: 4.075 seconds
+Time for KATS filter: 135.061 seconds
+Time for KATS backprojection: 5.152 seconds
+Total time for KATS reconstruction: 144.289 seconds
+Time for KATS initialization: 3.919 seconds
+Time for KATS filter: 140.405 seconds
+Time for KATS backprojection: 6.012 seconds
+Total time for KATS reconstruction: 150.335 seconds
+Time for KATS initialization: 3.966 seconds
+Time for KATS filter: 140.393 seconds
+Time for KATS backprojection: 5.880 seconds
+Total time for KATS reconstruction: 150.240 seconds
+Time for KATS initialization: 4.133 seconds
+Time for KATS filter: 163.991 seconds
+Time for KATS backprojection: 5.500 seconds
+Total time for KATS reconstruction: 173.624 seconds
+Time for KATS initialization: 4.128 seconds
+Time for KATS filter: 158.491 seconds
+Time for KATS backprojection: 6.455 seconds
+Total time for KATS reconstruction: 169.075 seconds
+Time for KATS initialization: 4.111 seconds
+Time for KATS filter: 158.118 seconds
+Time for KATS backprojection: 7.440 seconds
+Total time for KATS reconstruction: 169.670 seconds
+Time for KATS initialization: 4.107 seconds
+Time for KATS filter: 158.240 seconds
+Time for KATS backprojection: 7.222 seconds
+Total time for KATS reconstruction: 169.568 seconds

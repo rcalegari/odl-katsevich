@@ -1,0 +1,70 @@
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [ -6.30500189,  -6.29954782,  -6.29409352, ...,  57.24134541,
+          57.24679948,  57.25225354]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=34.437414,
+    offset_along_axis=-2.303012,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Number of views: 11654
+Reconstruction space:
+uniform_discr(
+    [-150.  , -150.  ,  -11.65], [ 150.  ,  150.  ,  286.35],
+    (512, 512, 298)
+)
+
+Using FFS: True
+Using FFS: True
+Time for FBP: 181.753 seconds
+Time for FBP: 184.383 seconds
+FBP PSNR: 24.019 dB
+FBP RMSE: 0.004
+FBP SSIM: 0.496
+FBP PSNR: 24.019 dB
+FBP RMSE: 0.004
+FBP SSIM: 0.496
+Using FFS: False
+Using FFS: False
+Time for FBP: 175.568 seconds
+FBP PSNR: 23.742 dB
+FBP RMSE: 0.004
+FBP SSIM: 0.456
+Time for FBP: 172.963 seconds
+FBP PSNR: 23.742 dB
+FBP RMSE: 0.004
+FBP SSIM: 0.456
+Time for KATS initialization: 2.210 seconds
+Time for KATS filter: 446.375 seconds
+Time for KATS backprojection: 23.648 seconds
+Total time for KATS reconstruction: 472.233 seconds
+Kats PSNR: -0.827 dB
+Kats RMSE: 0.071
+Kats SSIM: 0.015
+Time for KATS initialization: 2.208 seconds
+Time for KATS filter: 462.884 seconds
+Time for KATS backprojection: 23.908 seconds
+Total time for KATS reconstruction: 489.000 seconds
+Kats PSNR: -0.827 dB
+Kats RMSE: 0.071
+Kats SSIM: 0.015
+Time for KATS initialization: 2585.961 seconds
+Time for KATS filter: 533.995 seconds
+Time for KATS initialization: 2613.681 seconds
+Time for KATS filter: 522.597 seconds
+Time for KATS backprojection: 25.152 seconds
+Total time for KATS reconstruction: 3145.108 seconds
+Kats PSNR: -0.587 dB
+Kats RMSE: 0.069
+Kats SSIM: 0.014
+Time for KATS backprojection: 24.563 seconds
+Total time for KATS reconstruction: 3160.841 seconds
+Kats PSNR: -0.587 dB
+Kats RMSE: 0.069
+Kats SSIM: 0.014

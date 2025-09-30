@@ -1,0 +1,132 @@
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [-2.44127926, -2.43991575, -2.43855223, ...,  1.64524558,  1.6466091 ,
+          1.64797262]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=-22.986209,
+    offset_along_axis=135.5489,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Reconstruction space:
+uniform_discr(
+    [-125.  , -125.  , -209.75], [ 125.  ,  125.  ,   -9.75],
+    (512, 512, 40)
+)
+
+Using FFS: False
+Time for FBP: 40.154 seconds
+Time for KATS initialization: 1.677 seconds
+Time for KATS filter: 96.255 seconds
+Time for KATS backprojection: 3.551 seconds
+Total time for KATS reconstruction: 101.483 seconds
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [-2.44127926, -2.43991575, -2.43855223, ...,  1.64524558,  1.6466091 ,
+          1.64797262]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=-22.986209,
+    offset_along_axis=135.5489,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Number of views: 3000
+Reconstruction space:
+uniform_discr(
+    [-125.  , -125.  , -209.75], [ 125.  ,  125.  ,   -9.75],
+    (512, 512, 40)
+)
+
+Using FFS: False
+Time for FBP: 41.331 seconds
+FBP PSNR: 15.209 dB
+FBP RMSE: 0.014
+FBP SSIM: 0.479
+Time for KATS backprojection: 2.627 seconds
+Total time for KATS reconstruction: nan seconds
+Kats PSNR: 15.209 dB
+Kats RMSE: 0.014
+Kats SSIM: 0.479
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [-2.44127926, -2.43991575, -2.43855223, ...,  1.64524558,  1.6466091 ,
+          1.64797262]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=-22.986209,
+    offset_along_axis=135.5489,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Number of views: 3000
+Reconstruction space:
+uniform_discr(
+    [-125.  , -125.  , -209.75], [ 125.  ,  125.  ,   -9.75],
+    (512, 512, 40)
+)
+
+Using FFS: False
+Time for FBP: 40.385 seconds
+FBP PSNR: 15.209 dB
+FBP RMSE: 0.014
+FBP SSIM: 0.479
+Time for KATS backprojection: 2.577 seconds
+Total time for KATS reconstruction: nan seconds
+Kats PSNR: 15.209 dB
+Kats RMSE: 0.014
+Kats SSIM: 0.479
+Geometry:
+ConeBeamGeometry(
+    nonuniform_partition(
+        [-2.44127926, -2.43991575, -2.43855223, ...,  1.64524558,  1.6466091 ,
+          1.64797262]
+    ),
+    uniform_partition([ -0.4359, -35.0311], [  0.4359,  35.0311], (736, 64)),
+    src_radius=595.0,
+    det_radius=490.59998,
+    det_curvature_radius=1085.6,
+    pitch=-22.986209,
+    offset_along_axis=135.5489,
+    det_axes_init=('[ 0.99999911,  0.00133251,  0.        ]', '[ 0.,  0.,  1.]')
+)
+
+Number of views: 3000
+Reconstruction space:
+uniform_discr(
+    [-125.  , -125.  , -209.75], [ 125.  ,  125.  ,   -9.75],
+    (512, 512, 40)
+)
+
+Using FFS: False
+Time for FBP: 40.347 seconds
+FBP PSNR: 15.209 dB
+FBP RMSE: 0.014
+FBP SSIM: 0.479
+Time for KATS backprojection: 2.557 seconds
+Total time for KATS reconstruction: nan seconds
+Kats PSNR: 15.209 dB
+Kats RMSE: 0.014
+Kats SSIM: 0.479
+Using FFS: False
+Time for KATS backprojection: 2.853 seconds
+Total time for KATS reconstruction: nan seconds
+Kats PSNR: nan dB
+Kats RMSE: nan
+Kats SSIM: nan
+Using FFS: False
+Time for KATS backprojection: 2.932 seconds
+Total time for KATS reconstruction: nan seconds
