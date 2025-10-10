@@ -1,8 +1,10 @@
 
-'''import parameters in /home/rosaca/code/pine_16_1/metadata.json, create 
-   geometry, space.
-   import data from /home/rosaca/code/pine_16_1/sinogram.npy and run katsevich reco
-   on that.'''
+'''
+import parameters in /home/rosaca/code/pine_16_1/metadata.json, 
+create geometry, space.
+import data from /home/rosaca/code/pine_16_1/sinogram.npy and run 
+katsevich reconstruction on that.
+'''
 
 from typing import Dict
 from pathlib import Path
@@ -189,6 +191,7 @@ def make_operators_from_arr(
         ray_trafo_adjoint = ray_trafo.adjoint_kats
     return ray_trafo, ray_trafo_adjoint, k_min, k_max, geometry_full, reco_space
 
+# change with your path!!
 sample_path = Path('/home/rosaca/code/pine_16_1')
 
 print("Loading sinogram ...")
@@ -202,17 +205,14 @@ angles   = np.load(sample_path.joinpath('angles.npy'))
 shifts   = np.load(sample_path.joinpath('shifts.npy'))
 metadata = dict(json.load(open(sample_path.joinpath('metadata.json'))))
 
-volMinZ = 0.0
-volMaxZ = 369.36050892522326
-npxZ = 738
-
-detMinZ = -34.5
-detMaxZ = 34.5
-detNpxZ = 230
-
+volMinZ = metadata['VOL_MIN_Z']
+volMaxZ = metadata['VOL_MAX_Z']
+npxZ = metadata['NPX_Z']
+detMinZ = metadata['DET_MIN_Z']
+detMaxZ = metadata['DET_MAX_Z']
+detNpxZ = metadata['DET_NPX_Z']
 pixel_size = (detMaxZ - detMinZ) / detNpxZ
-
-pitch = 101.0
+pitch = metadata['PITCH']
 
 # # print("Angles:", angles[0], angles[-1])
 angles_mm = angles * pitch / (2 * np.pi)
@@ -224,11 +224,12 @@ angles_shifted = angles_shifted_mm * 2 * np.pi / pitch
 volMaxZ_shift = volMaxZ + angles_mm[0] - volMinZ
 volMinZ_shift = angles_mm[0]
 
-slice_k = 1/2
-print(f"Creating ray transform operator for slice {slice_k}...")
+'''
+slice_k and slice_bounds parameters for make_operators_from_arr function
+'''
+slice_k = 1/2 
 slice_bounds = [150., 200.]
-# print(f"Creating ray transform operator for slice bounds {slice_bounds}...")
-forward_operator, backward_operator, k_min, k_max, geom_full, reco_space = make_operators_from_arr(angles, shifts, metadata, volMinZ=volMinZ_shift, volMaxZ=volMaxZ_shift, slice_k=slice_k, slice_bounds=slice_bounds)
+forward_operator, backward_operator, k_min, k_max, geom_full, reco_space = make_operators_from_arr(angles, shifts, metadata, volMinZ=volMinZ_shift, volMaxZ=volMaxZ_shift, slice_k=slice_k) # , slice_bounds=slice_bounds)
 
 test_nonconstant_td_window = False
 if test_nonconstant_td_window:
@@ -239,8 +240,8 @@ if test_nonconstant_td_window:
 
 test_shift = False
 if test_shift:
-    _, _, k_min_sh, k_max_sh, geom_ang, _ = make_operators(angles_shifted, shifts, metadata, volMinZ=volMinZ, volMaxZ=volMaxZ)
-    _, _, k_min_og, k_max_og, geom_og, _ = make_operators(angles, shifts, metadata)
+    _, _, k_min_sh, k_max_sh, geom_ang, _ = make_operators_from_arr(angles_shifted, shifts, metadata, volMinZ=volMinZ, volMaxZ=volMaxZ)
+    _, _, k_min_og, k_max_og, geom_og, _ = make_operators_from_arr(angles, shifts, metadata, volMinZ=volMinZ, volMaxZ=volMaxZ)
 
     fig, axs = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
     axs[0].plot(angles_mm, label='angles (original)', color='orange', linestyle='--')
@@ -277,8 +278,10 @@ sinogram = sinogram[k_min:k_max+1, :, :]
 angles = angles[k_min:k_max+1]
 shifts = shifts[k_min:k_max+1, :]
 
-'''try fetching the filtered sinogram if available. if yes, use it and run backprojection on it,
-otherwise, filter, save it and run backprojection on the filtered sinogram.
+'''
+Try fetching the filtered sinogram if available. 
+If yes, use it and run backprojection on it.
+Otherwise, filter, save it and run backprojection on the filtered sinogram.
 '''
 filtdata_fbp_path = sample_path.joinpath('filtered_fbp.npy')
 filtdata_kats_path = sample_path.joinpath('filtered_kats_interval_full.npy')
@@ -292,6 +295,7 @@ else:
     filt_sino_fbp = filt_op_fbp(sinogram)
     np.save(filtdata_fbp_path, filt_sino_fbp)
     print("Filtered FBP sinogram saved.")
+
 if filtdata_kats_path.exists():
     print("Loading filtered sinogram for Katsevich...")
     filt_sino_kats = np.load(filtdata_kats_path, mmap_mode='r')
@@ -302,30 +306,18 @@ else:
     np.save(filtdata_kats_path, filt_sino_kats)
     print("Filtered KATS sinogram saved.")
 
-# fbp = odl.tomo.fbp_op(forward_operator, filter_type='Ram-Lak', frequency_scaling=0.8)
-# windowed_fbp = fbp * odl.tomo.tam_danielson_window(forward_operator)
+fbp = odl.tomo.fbp_op(forward_operator, filter_type='Ram-Lak', frequency_scaling=0.8)
+windowed_fbp = fbp * odl.tomo.tam_danielson_window(forward_operator)
 
-# print("Reconstructing data with FBP...")
-# try:
-#     fbp_reco = forward_operator.adjoint(filt_sino_fbp)
-# except Exception as e:
-#     print(f"Saved filtered data don't match the forward operator.\nRecompute filtered data")
-#     filt_op_fbp = odl.tomo.fbp_filter_op(forward_operator, filter_type='Ram-Lak', frequency_scaling=0.8) * odl.tomo.tam_danielson_window(forward_operator)
-#     filt_sino_fbp = filt_op_fbp(sinogram)
-#     np.save(filtdata_fbp_path, filt_sino_fbp)
-#     print("New filtered FBP sinogram saved.")
-#     fbp_reco = forward_operator.adjoint(filt_sino_fbp)
+print("Reconstructing data with FBP...")
 
-# # fbp_reco = windowed_fbp(sinogram)
-# print("FBP Reconstruction done.")
-# fbp_reco.show(saveto=sample_path.joinpath('fbp_reco.svg'), 
-#               title='FBP Reconstruction', 
-#               cmap='gray', 
-#               colorbar=True)
+fbp_reco = windowed_fbp(sinogram)
+print("FBP Reconstruction done.")
+fbp_reco.show(saveto=sample_path.joinpath('fbp_reco_og.svg'), 
+              title='FBP Reconstruction', 
+              cmap='gray', 
+              colorbar=True)
 
-# windowed_kats = odl.tomo.fbp_op(forward_operator, filter_type='Katsevich')
-# kats_reco = windowed_kats(sinogram)
-print("Reconstructing data with KATS...")
 astra_backend = False
 if astra_backend:
     for k, angle in enumerate(angles):
@@ -365,21 +357,10 @@ if astra_backend:
             kats_reco += backproj
 
 else:
-    kats_reco = backward_operator(odl.tomo.td_window_curved(forward_operator, filt_sino_kats, force_const=True))
+    kats_reco = backward_operator(odl.tomo.td_window_curved(forward_operator, filt_sino_kats, force_const=False))
 
-print("KATS Reconstruction done.")
-
-kats_reco_arr = np.transpose(kats_reco.asarray(), (2, 0, 1))
-
-save_xy_video(kats_reco_arr, sample_path, 'kats_reco_c_td', step=1, interval=1)
-
-kats_reco.show(saveto=sample_path.joinpath(f'kats_reco_interval.svg'),
-            title=f'Katsevich Reconstruction of interval [{slice_bounds[0], slice_bounds[1]}] of the total volume', 
+kats_reco.show(saveto=sample_path.joinpath(f'kats_reco.svg'),
+            title=f'Katsevich Reconstruction',
             cmap='gray', 
             colorbar=True)
 
-# diff = fbp_reco - kats_reco
-# diff.show(saveto=sample_path.joinpath('diff_reco.svg'),
-#         title='FBP - Katsevich Reconstruction', 
-#         cmap='gray', 
-#         colorbar=True)

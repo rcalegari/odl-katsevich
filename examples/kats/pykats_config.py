@@ -1,3 +1,11 @@
+'''
+Create ODL space and geometry from PyKatsevich configuration file for comparison.
+
+Modify the paths in the function to your local repos:
+- output_path: path to save the comparison results.
+- pykatsevich_path: path to your local pykatsevich repo.
+- test_path: path to your local pykatsevich tests folder.
+'''
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -8,40 +16,52 @@ import yaml
 from functools import partial
 
 def create_pykats_config(curved=False, test=1, complex_phantom=False, shifts=None):  
-    """Create and synchronize PyKatsevich and ODL configurations for helical CT comparison.
+    """Create and synchronize PyKatsevich and ODL configurations for comparison.
 
-    This function sets up a consistent configuration between the PyKatsevich and ODL 
-    libraries by:
+    This function sets up the same configuration in the 
+    PyKatsevich code and ODL by:
       - Loading a YAML configuration file used by PyKatsevich.
       - Initializing system geometry and phantom objects from PyKatsevich modules.
       - Creating the corresponding geometry and reconstruction space in ODL.
-      - Generating a 3D phantom and computing sinograms using both PyKatsevich and ODL.
-      - Saving visualizations of phantom and sinograms for direct comparison.
+      - Generating a 3D phantom and computing sinograms.
 
-    This utility is useful for validating that geometries, phantoms, and projection 
-    pipelines between PyKatsevich and ODL are aligned for helical CT reconstruction.
-
+    Useful for validating that geometries, phantoms, and projection 
+    pipelines between PyKatsevich and ODL are consistent  with each other.
+    
     Parameters
     ----------
-    None
+    curved : `bool`, optional
+        Whether to use a curved detector geometry. Default is `False` (flat detector).
+    test : `int`, optional
+        Test case number corresponding to a YAML configuration file 
+        (e.g., `test01.yaml`). Default is `1`. Used as a string for naming files.
 
+        test=102 is for complex phantom (shepp or ellipsoid)
+
+    complex_phantom : `bool`, optional
+        If `True`, uses a complex phantom (e.g., Shepp-Logan or ellipsoids).
+        If `False`, uses a simple phantom defined in the YAML file. Default is `False`.
+    shifts : `array-like` or `None`, optional
+        If provided, a sequence of shifts to apply to the source and detector 
+        positions (e.g. for flying focal spot). Default is `None` (no shifts).
+    
     Returns
     -------
     params : `dict`
         Dictionary containing parameters for constructing the ODL geometry, including
         source/detector radii, pitch, detector and reconstruction volume bounds and shapes.
     
-    geometry : `odl.tomo.geometry.conebeam.FanBeamGeometry`
+    geometry : `odl.tomo.geometry.ConeBeamGeometry`
         ODL geometry object corresponding to the system setup.
 
     space : `odl.uniform_discr`
         Discretized reconstruction space for the phantom volume.
 
     phantom_odl : `odl.Element`
-        ODL-compatible phantom volume created from PyKatsevich's phantom data.
+        ODL phantom volume created from phantom settings.
 
     ray_trafo : `odl.tomo.RayTransform`
-        Ray transform operator constructed using the ASTRA CUDA backend.
+        Ray transform operator constructed using the ASTRA backend.
 
     sinogram_odl : `odl.Element`
         Sinogram of the phantom generated using the ODL ray transform.
@@ -55,7 +75,6 @@ def create_pykats_config(curved=False, test=1, complex_phantom=False, shifts=Non
     - Requires a YAML configuration file defining geometry and phantom (e.g. `test01.yaml`).
     - Saves phantom and sinogram visualizations to `comparison/` directory.
     - Axes are aligned so that sinograms from PyKatsevich and ODL can be visually compared.
-    - Designed for debugging and validating geometric consistency in reconstruction pipelines.
     """
     # Paths
     output_path = '/home/rosaca/code/odl/examples/kats/comparison/'
@@ -188,7 +207,7 @@ def create_pykats_config(curved=False, test=1, complex_phantom=False, shifts=Non
     mean_src_x = (R / (2 * np.pi * range_s)) * (
                       np.sin(2 * np.pi * s_max) - np.sin(2 * np.pi * s_min))
     dx = 0 # 5.81828892
-    # print(f"Mean source x-position: {mean_src_x} mm")
+
     if shifts is not None:
         print('using shifts')
         geometry = odl.tomo.ConeBeamGeometry(apart=apart,
@@ -218,7 +237,7 @@ def create_pykats_config(curved=False, test=1, complex_phantom=False, shifts=Non
     #  the ODL phantom (slices, rows, columns)
     phantom_pykats_T = np.transpose(phantom_pykats, (2, 0, 1))
 
-    if complex_phantom:
+    if complex_phantom=='ellipsoid':
         ellipsoids = [
             # Central sphere
             [1.0, 0.6, 0.6, 0.6, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -229,8 +248,10 @@ def create_pykats_config(curved=False, test=1, complex_phantom=False, shifts=Non
             # Inner ellipsoid of hollow shell (subtracted)
             [-0.6, 0.3, 0.3, 0.3, -0.4, 0.4, -0.3, 0.0, np.pi/8, 0.0]
         ]
-        # phantom_odl = odl.phantom.ellipsoid_phantom(space, ellipsoids)
+        phantom_odl = odl.phantom.defrise(space, nellipses=4)
+    elif complex_phantom=='shepp':
         phantom_odl = odl.phantom.shepp_logan(space, modified=True)
+    # simple phantom case, build it from yaml settings
     else:
         phantom_odl = space.element(phantom_pykats_T) 
     
@@ -239,23 +260,6 @@ def create_pykats_config(curved=False, test=1, complex_phantom=False, shifts=Non
     sinogram_odl = ray_trafo(phantom_odl).asarray() 
     sinogram_pykats_T = np.transpose(sinogram_pykats, (1, 0, 2) if curv is None else (1, 2, 0))
     diff = sinogram_odl - sinogram_pykats_T
-
-    # # study centering phantom
-    # src_positions = geometry.src_position(angles)
-
-    # # 2. Compute mean x-position of the source
-    # mean_src_x = np.mean(src_positions[:, 0])
-    # mean_src_y = np.mean(src_positions[:, 1])
-    # mean_src_z = np.mean(src_positions[:, 2])
-
-    # # 3. Get phantom domain center in x
-    # phantom_center_x = 0.5 * (phantom_odl.space.domain[0].min() + phantom_odl.space.domain[0].max())
-    # phantom_center_y = 0.5 * (phantom_odl.space.domain[1].min() + phantom_odl.space.domain[1].max())
-    # phantom_center_z = 0.5 * (phantom_odl.space.domain[2].min() + phantom_odl.space.domain[2].max())
-    # # 4. Compute shift needed to align phantom to source trajectory
-    # dx = mean_src_x - phantom_center_x
-    # dy = mean_src_y - phantom_center_y
-    # dz = mean_src_z - phantom_center_z
 
     if diff.shape[1] == geom['detector']['detector rows']:
         diff = np.transpose(diff, (0, 2, 1))
@@ -272,24 +276,189 @@ def create_pykats_config(curved=False, test=1, complex_phantom=False, shifts=Non
     print('geometry and sino set up.')
     return params, geometry, space, phantom_odl, ray_trafo, sinogram_odl, kat_conf
 
-def create_space_geom(curved=True, shift_func=None, config='full', ffs=False):
+# geometry defined by variable number of helical turns
+# num_angles fixed
+def create_space_geom_new(curved=True, shift_func=None, config='full', ffs=False, num_turns=1):
 
     # taken from pykats test03.yaml
-    volCols = 560 # if config=='full' else 56
-    volRows = 540 # if config=='full' else 54
-    volSlices = 580 # if config=='full' else 58
-    voxel_size = 0.032 # if config=='full' else 0.32
+    volCols = 500 # if config=='full' else 56
+    volRows = 500 # if config=='full' else 54
+    volSlices = 300 # if config=='full' else 58
+    voxel_size = 1. # if config=='full' else 0.32
 
-    angles_count = 512 if config=='full' else 128 # total number of angles in the helical trajectory
+    # angles_count = 1024 if config=='full' else 128 # total number of angles in the helical trajectory
+    angles_range = 4 * np.pi # in radians
+    Rs = 570.
+    D = 1040.
+    # pitch_mm_rad = 3. # 5.25
+
+    # detector
+    detCols = 672 # 528 if config=='full' else 128
+    detRows = 64 # 464 if config=='full' else 116
+
+    minX = -volCols * voxel_size / 2
+    maxX = volCols * voxel_size / 2
+    minY = -volRows * voxel_size / 2
+    maxY = volRows * voxel_size / 2
+    minZ = -volSlices * voxel_size / 2
+    maxZ = volSlices * voxel_size / 2
+
+    # print(f"({minZ}, {maxZ}) should be inside ({-0.5 * pitch_mm_rad * angles_range}, {0.5 * pitch_mm_rad * angles_range})")
+    # assert that -0.5 * pitch_mm_rad * angles_range <= minZ <= maxZ <= 0.5 * pitch_mm_rad * angles_range, \
+    
+    # assert -0.5 * pitch_mm_rad * angles_range <= minZ <= maxZ <= 0.5 * pitch_mm_rad * angles_range
+
+    space = odl.uniform_discr(min_pt=[minZ, minY, minX],
+                              max_pt=[maxZ, maxY, maxX],
+                              shape=[volSlices, volRows, volCols], 
+                              dtype='float32')
+    
+    corners = space.domain.corners()[:, :2]
+    rho = np.max(np.linalg.norm(corners, axis=1))
+
+    pitch = space.partition.extent[2] / num_turns
+
+    params = {
+        "SRC_RADIUS": 570.0,
+        "DET_RADIUS": 470.0,
+        "PITCH": pitch,  # convert to per turn
+        "DET_X_MIN": - (672 / 2) * 1.4083,
+        "DET_X_MAX":   (672 / 2) * 1.4083,
+        "DET_Z_MIN": - (64 / 2) * 1.3684,
+        "DET_Z_MAX":   (64 / 2) * 1.3684,
+        "DET_NPX_X": 672,
+        "DET_NPX_Z": 64,
+        "REC_MIN_X": -449.2508,  # -224.6254,
+        "REC_MAX_X": -449.2508 + 1200 * 0.75,# -224.6254 + 600 * 0.75,
+        "REC_MIN_Y": -143.625,
+        "REC_MAX_Y": -143.625 + 384 * 0.75,
+        "REC_MIN_Z": -104.0,
+        "REC_MAX_Z": -104.0 + 464 * 0.75,
+        "REC_NPX_X": 600,
+        "REC_NPX_Y": 384,
+        "REC_NPX_Z": 116,
+        "ANGLES_PER_TURN": 1160,
+        "DET_CURVATURE_RADIUS": None,
+        "DET_PIXEL_SIZE": 1.4083  # just a placeholder for consistency
+    }
+    angles_count = np.floor(params['ANGLES_PER_TURN'] * (params['REC_MAX_Z'] - params['REC_MIN_Z']) / (params['PITCH'])).astype(int)
+
+    if params['DET_CURVATURE_RADIUS'] is not None:
+        params['DET_X_MIN'] = np.arctan(params['DET_X_MIN'] / params['DET_CURVATURE_RADIUS'])
+        params['DET_X_MAX'] = np.arctan(params['DET_X_MAX'] / params['DET_CURVATURE_RADIUS'])
+        curv = (params['DET_CURVATURE_RADIUS'], None)
+        min_pt = (params["DET_X_MIN"], params["DET_Z_MIN"]) # see astra_setup.py
+        max_pt = (params["DET_X_MAX"], params["DET_Z_MAX"])
+        shape_dpart = (params["DET_NPX_X"], params["DET_NPX_Z"])
+        det_axes = [(0, 1, 0), (0, 0, 1)]
+    else:
+        curv = None
+        min_pt = (params["DET_Z_MIN"], params["DET_X_MIN"]) # see astra_setup.py
+        max_pt = (params["DET_Z_MAX"], params["DET_X_MAX"])
+        shape_dpart = (params["DET_NPX_Z"], params["DET_NPX_X"])
+        det_axes = [(0, 0, 1), (0, 1, 0)]
+
+    s_len = angles_count / params["ANGLES_PER_TURN"] 
+    s_min = -s_len * 0.5
+    delta_s = 2 * np.pi / params["ANGLES_PER_TURN"] # Turn in radians per projection 
+    angles = s_min + delta_s * (np.arange(angles_count, dtype=np.float32) + 0.5 )  # only with nodes_on_bdry=True
+    N_s = angles_count
+    apart = odl.uniform_partition(angles[0], angles[-1], N_s, nodes_on_bdry=True)
+    
+    # apart = odl.nonuniform_partition(angles)
+    dpart = odl.uniform_partition(min_pt, max_pt, shape_dpart)
+
+    src_shift_func = None
+    det_shift_func = None
+    # --- Non-constant pitch (z-shift) ---
+    if shift_func is not None:
+        if ffs:
+            raise ValueError("Don't test pitch and ffs at the same time.")
+        shift_func = partial(odl.tomo.flying_focal_spot, apart=apart, shifts=shift_func)
+        src_shift_func = shift_func
+        det_shift_func = shift_func
+    
+    # --- Flying focal spot (synthetic alternating pattern) ---
+    if ffs:
+        offset_angular = np.tile([np.deg2rad(0.021), np.deg2rad(0.02)], angles_count // 2)  
+        offset_radial = np.tile([0.0, 0.4], angles_count // 2)              
+        offset_axial = np.tile([0.0, 0.06], angles_count // 2) 
+
+        src_radius = params["SRC_RADIUS"]
+        pitch = params["PITCH"]
+
+        det_offset_axial = (offset_axial + angles / (2 * np.pi) * pitch)               
+
+        # Compute along-axis offset
+        offset_along_axis = - angles[0] / (2 * np.pi) * pitch 
+
+        # Source shifts
+        shift_d = np.cos(-offset_angular) * (src_radius + offset_radial) - src_radius
+        shift_t = np.sin(-offset_angular) * (src_radius + offset_radial)
+        print(shift_d[0:10], shift_t[0:10])
+        # Approximate z pitch correction
+        shift_z = -(det_offset_axial - angles / (2 * np.pi) * pitch - offset_along_axis)
+        shift_r = shift_z - offset_axial
+
+        shift_angle = 0.0013325066936852141
+
+        # Define src and det shift functions
+        shifts = np.transpose(np.vstack([shift_d, shift_t, shift_r]))
+        R = np.array([
+        [np.cos(shift_angle), -np.sin(shift_angle)],
+        [np.sin(shift_angle),  np.cos(shift_angle)]
+        ])
+        shifts[:, :2] = shifts[:, :2] @ R.T
+        src_shift_func = partial(odl.tomo.flying_focal_spot, 
+                                 apart=apart, shifts=shifts)
+
+        # detector shifts
+        det_axes = [(np.cos(shift_angle), np.sin(shift_angle), 0),
+                     (0, 0, 1)]
+        shift_d_det = D * (np.cos(shift_angle) - 1)
+        shift_t_det = D * np.sin(shift_angle)
+        n_angles = len(angles)
+        shifts_det = np.transpose(np.vstack([
+            np.ones(n_angles) * shift_d_det,
+            np.ones(n_angles) * shift_t_det,
+            shift_z]))
+        det_shift_func = partial(odl.tomo.flying_focal_spot, 
+                                 apart=apart, shifts=shifts_det)
+        
+        
+    geometry = odl.tomo.ConeBeamGeometry(apart=apart,
+                                         dpart=dpart,
+                                         src_radius=params["SRC_RADIUS"],
+                                         det_radius=params["DET_RADIUS"],
+                                         det_curvature_radius=curv,
+                                         pitch=params["PITCH"],
+                                         src_shift_func=src_shift_func,
+                                         det_shift_func=det_shift_func,
+                                         src_to_det_init=(-1, 0, 0), # src_to_det_init = (-np.cos(shift_angle), -np.sin(shift_angle), 0), # 
+                                         det_axes_init=det_axes)
+    
+    return params, space, geometry
+
+# geometry defined by variable number of total views on trajectory
+# num turns fixed
+def create_space_geom(curved=True, shift_func=None, config='full', ffs=False, angles_count=None):
+
+    # taken from pykats test03.yaml
+    volCols = 280 # if config=='full' else 56
+    volRows = 260 # if config=='full' else 54
+    volSlices = 290 # if config=='full' else 58
+    voxel_size = 0.064 # if config=='full' else 0.32
+    if angles_count is None:
+        angles_count = 1024 if config=='full' else 128 # total number of angles in the helical trajectory
     angles_range = 7.084794 # in radians
     Rs = 50
     D = 80
-    pitch_mm_rad = 5.25
+    pitch_mm_rad = 3. # 5.25
 
     # detector
-    detCols = 1056 if config=='full' else 128
-    detRows = 928 if config=='full' else 116
-    pixel_size = 0.078125 if config=='full' else 0.3125 # 0.078125 # detector pixel size in mm
+    detCols = 128 # 528 if config=='full' else 128
+    detRows = 116 # 464 if config=='full' else 116
+    pixel_size = 0.3125 # 0.15625 if config=='full' else 0.3125 # 0.078125 # detector pixel size in mm
 
     minX = -volCols * voxel_size / 2
     maxX = volCols * voxel_size / 2
@@ -428,3 +597,49 @@ def create_space_geom(curved=True, shift_func=None, config='full', ffs=False):
                                          det_axes_init=det_axes)
     
     return params, space, geometry
+
+# create space and geometry with simple settings
+def create_space_geom_simple(curved=True, num_angles=None):
+    space = odl.uniform_discr(
+    min_pt=[-20, -20, -20], max_pt=[20, 20, 20], shape=[300, 300, 400],
+    dtype='float32')
+    if num_angles is None:
+        num_angles = 500
+    num_turns = 5
+    if not curved:
+        geometry = odl.tomo.helical_geometry(space,
+                                     src_radius=40, det_radius=40,
+                                     num_turns=num_turns, num_angles=num_angles)
+    else:
+        geometry = odl.tomo.helical_geometry_curved(
+            space, src_radius=100, det_radius=100,
+            num_turns=num_turns, num_angles=num_angles, curvature_radius=200,)
+    Rs = geometry.src_radius
+    Rd = geometry.det_radius 
+    P = geometry.pitch
+
+    params = {
+        "SRC_RADIUS": Rs,
+        "DET_RADIUS": Rd,
+        "PITCH": P,
+        "DET_X_MIN": - geometry.det_partition.coord_vectors[0][0],
+        "DET_X_MAX":   geometry.det_partition.coord_vectors[0][-1],
+        "DET_Z_MIN": - geometry.det_partition.coord_vectors[1][0],
+        "DET_Z_MAX":   geometry.det_partition.coord_vectors[1][-1],
+        "DET_NPX_X": geometry.det_partition.shape[0],
+        "DET_NPX_Z": geometry.det_partition.shape[1],
+        "REC_MIN_X": space.partition.coord_vectors[2][0],
+        "REC_MAX_X": space.partition.coord_vectors[2][-1],
+        "REC_MIN_Y": space.partition.coord_vectors[1][0],
+        "REC_MAX_Y": space.partition.coord_vectors[1][-1],
+        "REC_MIN_Z": space.partition.coord_vectors[0][0],
+        "REC_MAX_Z": space.partition.coord_vectors[0][-1],
+        "REC_NPX_X": space.shape[2],
+        "REC_NPX_Y": space.shape[1],
+        "REC_NPX_Z": space.shape[0],
+        "ANGLES_PER_TURN": num_angles / num_turns,
+        "DET_CURVATURE_RADIUS": Rs+Rd,
+    }
+    print('params:', params)
+    return params, space, geometry
+        
